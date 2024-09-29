@@ -62,8 +62,7 @@ public class MainActivity extends AppCompatActivity {
     private Handler handler = new Handler();
     private ImageView imageView;
     private VideoView videoView;
-    private String apikey = "";
-    private String userid = "";
+    private String googlePhotosUrl = "";
     private int displayOption = 0;
     private int startQuietHour = -1;
     private int endQuietHour = -1;
@@ -94,7 +93,7 @@ public class MainActivity extends AppCompatActivity {
 
         loadsettings();
 
-        if (userid.isEmpty() || apikey.isEmpty()) {
+        if (googlePhotosUrl.isEmpty()) {
             showSetupDialog();
         }
 
@@ -146,8 +145,7 @@ public class MainActivity extends AppCompatActivity {
 
     void loadsettings() {
         SharedPreferences settings = getSharedPreferences("prefs", MODE_PRIVATE);
-        userid = settings.getString("userid", "");
-        apikey = settings.getString("apikey", "");
+        googlePhotosUrl = settings.getString("googlePhotosUrl", "");
         displayOption = settings.getInt("displayOption", 0);
         startQuietHour = settings.getInt("startQuietHour", -1);
         endQuietHour = settings.getInt("endQuietHour", -1);
@@ -160,7 +158,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onResume() {
-        if (!userid.isEmpty() && !apikey.isEmpty()) {
+        if (!googlePhotosUrl.isEmpty()) {
             loadImagesFromGooglePhotos();
         }
 
@@ -216,8 +214,7 @@ public class MainActivity extends AppCompatActivity {
         View customLayout = getLayoutInflater().inflate(R.layout.options, null);
         builder.setView(customLayout);
 
-        final EditText userIdEditText = customLayout.findViewById(R.id.editTextUserId);
-        final EditText apiKeyEditText = customLayout.findViewById(R.id.editTextApiKey);
+        final EditText googlePhotosUrlEditText = customLayout.findViewById(R.id.editTextGooglePhotosUrl);
         final Spinner startHourSpinner = customLayout.findViewById(R.id.startHourSpinner);
         final Spinner endHourSpinner = customLayout.findViewById(R.id.endHourSpinner);
         final Button btnLoadConfig = customLayout.findViewById(R.id.btnLoadConfig);
@@ -226,8 +223,7 @@ public class MainActivity extends AppCompatActivity {
         final CheckBox cbAutoBrightness = customLayout.findViewById(R.id.cbBrightnessAuto);
         final SeekBar sbBrightness = customLayout.findViewById(R.id.sbBrightness);
 
-        userIdEditText.setText(userid);
-        apiKeyEditText.setText(apikey);
+        googlePhotosUrlEditText.setText(googlePhotosUrl);
         editTextCustomTag.setText(customTag);
         editTextInterval.setText(String.valueOf(interval));
         if (autobrightness) {
@@ -318,8 +314,7 @@ public class MainActivity extends AppCompatActivity {
                         e.printStackTrace();
                     }
 
-                    userIdEditText.setText(sb.toString().split("\n")[0]);
-                    apiKeyEditText.setText(sb.toString().split("\n")[1]);
+                    googlePhotosUrlEditText.setText(sb.toString().split("\n")[0]);
                 }
             }
         });
@@ -330,8 +325,7 @@ public class MainActivity extends AppCompatActivity {
                 .setPositiveButton("Save", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        userid = userIdEditText.getText().toString().trim();
-                        apikey = apiKeyEditText.getText().toString().trim();
+                        googlePhotosUrl = googlePhotosUrlEditText.getText().toString().trim();
                         displayOption = Util.getSelectedOptionIndex(optionsRadioGroup);
                         startQuietHour = Integer.parseInt(startHourSpinner.getSelectedItem().toString());
                         endQuietHour = Integer.parseInt(endHourSpinner.getSelectedItem().toString());
@@ -340,11 +334,10 @@ public class MainActivity extends AppCompatActivity {
                         interval = Integer.parseInt(editTextInterval.getText().toString().trim());
                         autobrightness = cbAutoBrightness.isChecked();
 
-                        if (!userid.isEmpty() && !apikey.isEmpty()) {
+                        if (!googlePhotosUrl.isEmpty()) {
                             SharedPreferences settings = getSharedPreferences("prefs", MODE_PRIVATE);
                             SharedPreferences.Editor editor = settings.edit();
-                            editor.putString("userid", userid);
-                            editor.putString("apikey", apikey);
+                            editor.putString("googlePhotosUrl", googlePhotosUrl);
                             editor.putInt("displayOption", displayOption);
                             editor.putInt("startQuietHour", startQuietHour);
                             editor.putInt("endQuietHour", endQuietHour);
@@ -362,7 +355,7 @@ public class MainActivity extends AppCompatActivity {
 
                             if (isInQuietHours) adjustScreenBrightness(0);
                         } else {
-                            Toast.makeText(MainActivity.this, "Please enter User ID and API Key", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "Please enter Google Photos URL", Toast.LENGTH_SHORT).show();
                         }
                     }
                 })
@@ -468,8 +461,7 @@ public class MainActivity extends AppCompatActivity {
             startService(serviceIntent);
 
             // Fetch images from Google Photos album using public URL
-            String googlePhotosAlbumUrl = "https://photos.app.goo.gl/BCHX2d2fCXCjUEws9";
-            new FetchGooglePhotosTask().execute(googlePhotosAlbumUrl);
+            new FetchGooglePhotosTask().execute(googlePhotosUrl);
         } else {
             new android.os.Handler().postDelayed(new Runnable() {
                 @Override

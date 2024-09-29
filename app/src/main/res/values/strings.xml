@@ -1,3 +1,19 @@
 <resources>
     <string name="app_name">EO1</string>
+    <string name="google_photos_url_hint">Google Photos URL</string>
+    <string name="load_config_button_text">Load above settings from config.txt</string>
+    <string name="setup_dialog_title">Setup</string>
+    <string name="save_button_text">Save</string>
+    <string name="cancel_button_text">Cancel</string>
+    <string name="slideshow_options_title">Slideshow options:</string>
+    <string name="show_my_photos_option">Show my photos</string>
+    <string name="show_public_photos_option">Show public photos tagged 'ElectricObjectsLives'</string>
+    <string name="show_photos_tagged_option">Show photos tagged with...</string>
+    <string name="enter_custom_tag_hint">Enter custom tag</string>
+    <string name="quiet_hours_title">Quiet hours:</string>
+    <string name="start_hour_label">Start Hour</string>
+    <string name="end_hour_label">End Hour</string>
+    <string name="slideshow_interval_title">Slideshow interval (in minutes):</string>
+    <string name="brightness_title">Brightness:</string>
+    <string name="auto_brightness_checkbox">Auto brightness</string>
 </resources>

@@ -20,16 +20,10 @@
         android:textAppearance="@style/TextAppearance.AppCompat.Large" />
 
     <EditText
-        android:id="@+id/editTextUserId"
+        android:id="@+id/editTextGooglePhotosUrl"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="User ID" />
-
-    <EditText
-        android:id="@+id/editTextApiKey"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="API Key" />
+        android:hint="Google Photos URL" />
 
     <Button
         android:id="@+id/btnLoadConfig"
