@@ -9,13 +9,12 @@
 ### Requirements 
 
 - You need a way to connect a keyboard and mouse to your EO1.  I got one of these -- https://www.amazon.com/gp/product/B01C6032G0/ -- and connected my USB keyboard to it, then my USB mouse to the keyboard.
-- Flickr API key:  Once you've signed up for [Flickr](https://www.flickr.com), go [here](https://www.flickr.com/services/apps/create/apply/), to create an "app".  Once you walk through the short wizard, your key will look like a series of numbers and letters. You will want the **public key**.
-- Flickr User ID:  Your user ID is in the URL bar when viewing your photos.  For example it is bolded in the following URL:  https://www.flickr.com/photos/ **193118297@N04** / — you only need the User ID, not the entire URL.  If you have a custom name in your URL there are other methods to get the userID, described [here](https://www.flickr.com/help/forum/en-us/72157632667188299/).
-- Upon setting up the app, it'll ask for these two pieces of info.  You can either type them in on the setup dialog, or put them into a file (the User ID, followed by a carriage return, followed by your Public API key).  Name this file **"config.txt"** and copy it to your EO1's "Downloads" folder.  (An easy way to do this is to email yourself the file then log into your email and download it using the EO1's web browser [described below]).
+- Google Photos public URL: You need a public URL of a Google Photos album. For example, you can use this URL: https://photos.app.goo.gl/BCHX2d2fCXCjUEws9
+- Upon setting up the app, it'll ask for the Google Photos public URL. You can either type it in on the setup dialog, or put it into a file named **"config.txt"** and copy it to your EO1's "Downloads" folder. (An easy way to do this is to email yourself the file then log into your email and download it using the EO1's web browser [described below]).
 
 ### Setup
 
-- Upload some EO art to your Flickr account.  There's a good collection here:  https://github.com/crushallhumans/eo1-iframe/tree/main/eo1_caches/mp4s -- MP4 videos and still images are supported.
+- Upload some EO art to your Google Photos album. MP4 videos and still images are supported.
 - Once you boot up your EO1 and it hangs on the "Getting Art" dialog, hit **WINDOWS + B** to open a web browser
 - You need to tell your EO1 to allow side-loading.  Swipe down on the top right and go to Settings > Security.  In there make sure "Unknown Sources" is checked.
 - Go back to the browser and go to this URL: https://github.com/spalt/EO1/releases/download/0.0.8/EO1.apk (you may need to use the mirror, [by clicking here](http://danexchtest11.cloudapp.net/private/releases/EO1.apk))
@@ -31,7 +30,7 @@
 - Fixes custom tag ocassionally losing value (take 2)
 - Fixes random dimming during static photo or video display
 - Better error recovery during media download
-- Adds retreiving additional media after #500 -- app will cycle through "pages" of responses from the Flickr API 
+- Adds retreiving additional media after #500 -- app will cycle through "pages" of responses from the Google Photos album 
 - Adds video media caching and auto-cache cleanup: video art will be cached and not re-downloaded when possible
 
 ### New in 0.0.7
@@ -62,11 +61,11 @@ Device app:
 - Better handling of bad/no network scenarios
 
 Partner app:
-- Handles intents from Flickr app in a better way (you must upgrade the partner app if you update to 0.0.4 on the device)
+- Handles intents from Google Photos app in a better way (you must upgrade the partner app if you update to 0.0.4 on the device)
 
 ### Partner App
 
-- A "Partner App" (for Android) runs on your phone or mobile device and allows you to push images or video directly from the <A href="https://play.google.com/store/apps/details?id=com.flickr.android&hl=en_US&gl=US">Flickr Android App</a> using the share icon, assuming you are running on the same network as your EO1 device.  Running the Partner App from the Start menu of your phone allows you to skip to the next item in the current slideshow or resume the slideshow after sharing an individual item.  You can also update the current Tag (original Tag will be restored next time the device restarts), adjust brightness and change your slideshow interval.
+- A "Partner App" (for Android) runs on your phone or mobile device and allows you to push images or video directly from the <A href="https://play.google.com/store/apps/details?id=com.google.android.apps.photos&hl=en_US&gl=US">Google Photos Android App</a> using the share icon, assuming you are running on the same network as your EO1 device.  Running the Partner App from the Start menu of your phone allows you to skip to the next item in the current slideshow or resume the slideshow after sharing an individual item.  You can also update the current Tag (original Tag will be restored next time the device restarts), adjust brightness and change your slideshow interval.
 - To install, you must allow "Unknown Sources" on your device.
 - Point your device web browser to https://github.com/spalt/EO1/releases/download/0.0.6/EO1-Partner.apk and follow the prompts to install.  You may need to agree to several warnings.
 

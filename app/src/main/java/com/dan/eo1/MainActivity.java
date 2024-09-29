@@ -54,12 +54,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-import retrofit2.Call;
-import retrofit2.Callback;
-import retrofit2.Response;
-import retrofit2.Retrofit;
-import retrofit2.converter.gson.GsonConverterFactory;
-
 public class MainActivity extends AppCompatActivity {
 
     public int per_page = 500; //500 max
@@ -73,7 +67,7 @@ public class MainActivity extends AppCompatActivity {
     private int displayOption = 0;
     private int startQuietHour = -1;
     private int endQuietHour = -1;
-    private List<FlickrPhoto> flickrPhotos;
+    private List<String> googlePhotosUrls;
     private boolean isInQuietHours = false;
     private String customTag = "";
     private SensorManager mSensorManager;
@@ -167,7 +161,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         if (!userid.isEmpty() && !apikey.isEmpty()) {
-            loadImagesFromFlickr();
+            loadImagesFromGooglePhotos();
         }
 
         super.onResume();
@@ -364,7 +358,7 @@ public class MainActivity extends AppCompatActivity {
 
                             if (quietHoursCalc()) isInQuietHours = true; else isInQuietHours = false;
 
-                            loadImagesFromFlickr();
+                            loadImagesFromGooglePhotos();
 
                             if (isInQuietHours) adjustScreenBrightness(0);
                         } else {
@@ -423,34 +417,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showNextImage() {
-        if (flickrPhotos != null && !flickrPhotos.isEmpty() && slideshowpaused==false) {
-            if (currentPosition >= flickrPhotos.size()) {
-                if (page + 1 <= totalPages) page++;
-                loadImagesFromFlickr();
-                if (page == totalPages) page = 1;
-                return;
+        if (googlePhotosUrls != null && !googlePhotosUrls.isEmpty() && slideshowpaused==false) {
+            if (currentPosition >= googlePhotosUrls.size()) {
+                currentPosition = 0;
             }
 
             try {
-                String mediatype = flickrPhotos.get(currentPosition).getMedia();
+                String mediaUrl = googlePhotosUrls.get(currentPosition);
 
-                if (!mediatype.equals("video")) {
+                if (!mediaUrl.contains("video")) {
                     videoView.setVisibility(View.INVISIBLE);
                     imageView.setVisibility(View.VISIBLE);
 
-                    if (flickrPhotos.get(currentPosition).getUrlO() == null) {
-                        currentPosition++;
+                    Picasso.get().load(mediaUrl).fit().centerInside().into(imageView);
+                    progress.setVisibility(View.INVISIBLE);
 
-                        showNextImage();
-                        return;
-                    } else {
-                        String imageUrl = flickrPhotos.get(currentPosition).getUrlO().toString().replace("_o", "_k");
-                        Picasso.get().load(imageUrl).fit().centerInside().into(imageView); //Picasso.get().load(imageUrl).fit().centerCrop().into(imageView);
-                        progress.setVisibility(View.INVISIBLE);
-
-                        currentPosition++;
-                    }
-
+                    currentPosition++;
                 } else {
                     imageView.setVisibility(View.INVISIBLE);
 
@@ -460,13 +442,7 @@ public class MainActivity extends AppCompatActivity {
 
                     videoView.setMediaController(mediaController);
 
-                    String url = "";
-                    if (flickrPhotos.get(currentPosition).getOriginalSecret() == null)
-                        url = "https://www.flickr.com/photos/" + userid + "/" + flickrPhotos.get(currentPosition).getId() + "/play/720p/" + flickrPhotos.get(currentPosition).getSecret();
-                    else
-                        url = "https://www.flickr.com/photos/" + userid + "/" + flickrPhotos.get(currentPosition).getId() + "/play/orig/" + flickrPhotos.get(currentPosition).getOriginalSecret();
-
-                    new DownloadVideoTask().execute(url, flickrPhotos.get(currentPosition).getId());
+                    new DownloadVideoTask().execute(mediaUrl);
                 }
             } catch (Exception ex) {
                 progress.setVisibility(View.VISIBLE);
@@ -480,7 +456,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void loadImagesFromFlickr() {
+    private void loadImagesFromGooglePhotos() {
         if (!isInQuietHours) progress.setVisibility(View.VISIBLE);
         imageView.setVisibility(View.INVISIBLE);
         videoView.setVisibility(View.INVISIBLE);
@@ -491,55 +467,38 @@ public class MainActivity extends AppCompatActivity {
             Intent serviceIntent = new Intent(this, MyMessageService.class);
             startService(serviceIntent);
 
-            Retrofit retrofit = new Retrofit.Builder()
-                    .baseUrl("https://api.flickr.com/services/rest/")
-                    .addConverterFactory(GsonConverterFactory.create())
-                    .client(new okhttp3.OkHttpClient())
-                    .build();
-
-            FlickrApiService apiService = retrofit.create(FlickrApiService.class);
-            Call<FlickrApiResponse> call;
-
-            if (displayOption == 0)
-                call = apiService.getPublicPhotos(apikey, userid, per_page, "media,url_o,original_format", page);
-            else
-                call = apiService.searchPhotos(apikey, "", per_page, (customTag.equals("") ? "electricobjectslives": customTag), "media,url_o,original_format", page);
-            call.enqueue(new Callback<FlickrApiResponse>() {
-                @Override
-                public void onResponse(Call<FlickrApiResponse> call, Response<FlickrApiResponse> response) {
-                    if (response.isSuccessful()) {
-                        FlickrApiResponse apiResponse = response.body();
-                        if (apiResponse != null) {
-                            try {
-                                FlickrPhotos fp = apiResponse.getPhotos();
-                                flickrPhotos = fp.getPhotoList();
-                                totalPages = Integer.parseInt(fp.getPages());
-                                if (flickrPhotos.size() == 0) {
-                                    customTag = ""; page = 1; loadImagesFromFlickr(); return;
-                                }
-                                currentPosition = 0;
-                                Collections.shuffle(flickrPhotos, new Random());
-                                startSlideshow();
-                            } catch (Exception ex) {
-                                Toast.makeText(MainActivity.this, "Flickr failure, check API key", Toast.LENGTH_SHORT).show();
-                                showSetupDialog();
-                            }
-                        }
-                    }
-                }
-
-                @Override
-                public void onFailure(Call<FlickrApiResponse> call, Throwable t) {
-                    Toast.makeText(MainActivity.this, "Flickr failure", Toast.LENGTH_SHORT).show();
-                }
-            });
+            // Fetch images from Google Photos album using public URL
+            String googlePhotosAlbumUrl = "https://photos.app.goo.gl/BCHX2d2fCXCjUEws9";
+            new FetchGooglePhotosTask().execute(googlePhotosAlbumUrl);
         } else {
             new android.os.Handler().postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    loadImagesFromFlickr(); // Retry loading images after delay
+                    loadImagesFromGooglePhotos(); // Retry loading images after delay
                 }
             }, 10000);
+        }
+    }
+
+    private class FetchGooglePhotosTask extends AsyncTask<String, Void, List<String>> {
+        @Override
+        protected List<String> doInBackground(String... params) {
+            String albumUrl = params[0];
+            // Fetch image URLs from Google Photos album using the public URL
+            // Implement the logic to fetch image URLs from the album
+            // Return the list of image URLs
+            return null; // Replace with actual implementation
+        }
+
+        @Override
+        protected void onPostExecute(List<String> urls) {
+            if (urls != null && !urls.isEmpty()) {
+                googlePhotosUrls = urls;
+                currentPosition = 0;
+                startSlideshow();
+            } else {
+                Toast.makeText(MainActivity.this, "Failed to fetch images from Google Photos", Toast.LENGTH_SHORT).show();
+            }
         }
     }
 
@@ -571,7 +530,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         protected String doInBackground(String... params) {
             String videoUrl = params[0];
-            String videoId = params[1];
+            String videoId = videoUrl.substring(videoUrl.lastIndexOf('/') + 1);
             if (new File(getCacheDir(), videoId + ".mp4").exists()) {
                 return new File(getCacheDir(), videoId + ".mp4").getPath();
             }
@@ -683,7 +642,7 @@ public class MainActivity extends AppCompatActivity {
                             startQuietHour = incomingStartQuietHour;
                             endQuietHour = incomingEndQuietHour;
                             if (quietHoursCalc()) isInQuietHours = true; else isInQuietHours = false;
-                            loadImagesFromFlickr();
+                            loadImagesFromGooglePhotos();
                             if (isInQuietHours) adjustScreenBrightness(0);
                         }
                     }
@@ -702,65 +661,12 @@ public class MainActivity extends AppCompatActivity {
                             getWindow().setAttributes(params);
                         }
 
-                        Retrofit retrofit = new Retrofit.Builder()
-                                    .baseUrl("https://api.flickr.com/services/rest/")
-                                    .addConverterFactory(GsonConverterFactory.create())
-                                    .client(new okhttp3.OkHttpClient())
-                                    .build();
-                        FlickrApiService apiService = retrofit.create(FlickrApiService.class);
-                            String id = intent.getStringExtra("imageid");
-                            Call<FlickrGetSizesResponse> call = apiService.getSizes(apikey, id);
-                            call.enqueue(new Callback<FlickrGetSizesResponse>() {
-                                @Override
-                                public void onResponse(Call<FlickrGetSizesResponse> call, Response<FlickrGetSizesResponse> response) {
-                                    if (response.isSuccessful()) {
-                                        FlickrGetSizesResponse flickrSizesResponse = response.body();
-                                        if (flickrSizesResponse != null) {
-                                            List<FlickrGetSizesResponse.FlickrImageSize> imageSizes = flickrSizesResponse.getSizes().getImageSizes();
-                                            for (FlickrGetSizesResponse.FlickrImageSize size : imageSizes) {
-                                                String label = size.getLabel();
-                                                String imageUrl = size.getSourceUrl();
-                                                if (type.equals("image") && label.equals("Original")) {
-                                                    loadImage(imageUrl);
-                                                    return;
-                                                }
-                                                if (type.equals("video") && label.equals("720p")) {
-                                                    loadVideo(imageUrl, id);
-                                                    return;
-                                                }
-                                            }
-                                            //couldn't find 720p, get 360p
-                                            for (FlickrGetSizesResponse.FlickrImageSize size : imageSizes) {
-                                                String label = size.getLabel();
-                                                if (type.equals("video") && label.equals("360p")) {
-                                                    loadVideo(size.getSourceUrl(), id);
-                                                    return;
-                                                }
-                                            }
-                                            //couldn't find original image, find Large or Large 1600
-                                            if (type.equals("image")) {
-                                                for (int i= imageSizes.size() - 1; i >= 0; i--) {
-                                                    String label = imageSizes.get(i).getLabel();
-                                                    if (label.equals("Large") || label.equals("Large 1600")) {
-                                                        loadImage(imageSizes.get(i).getSourceUrl());
-                                                        return;
-                                                    }
-                                                }
-                                            }
-                                            Toast.makeText(MainActivity.this, "No source found.", Toast.LENGTH_SHORT).show();
-                                            slideshowpaused = false;
-                                            showNextImage();
-                                        }
-                                    }
-                                }
-
-                                @Override
-                                public void onFailure(Call<FlickrGetSizesResponse> call, Throwable t) {
-                                    Toast.makeText(MainActivity.this, "Flickr failure", Toast.LENGTH_SHORT).show();
-                                    slideshowpaused = false;
-                                    showNextImage();
-                                }
-                            });
+                        String mediaUrl = intent.getStringExtra("imageid");
+                        if (type.equals("image")) {
+                            loadImage(mediaUrl);
+                        } else if (type.equals("video")) {
+                            loadVideo(mediaUrl);
+                        }
                     }
 
                     if (type.equals("resume")) {
@@ -794,7 +700,7 @@ public class MainActivity extends AppCompatActivity {
                             page = 1;
                         }
                         slideshowpaused = false;
-                        loadImagesFromFlickr();
+                        loadImagesFromGooglePhotos();
                     }
 
                 }
@@ -802,14 +708,14 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    public void loadVideo(String url, String id) {
+    public void loadVideo(String url) {
         MediaController mediaController = new MediaController(MainActivity.this);
         mediaController.setAnchorView(videoView);
         mediaController.setVisibility(View.INVISIBLE);
 
         videoView.setMediaController(mediaController);
 
-        new DownloadVideoTask().execute(url, id);
+        new DownloadVideoTask().execute(url);
     }
 
     public void loadImage(String url) {

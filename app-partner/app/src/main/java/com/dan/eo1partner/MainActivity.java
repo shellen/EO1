@@ -3,7 +3,6 @@ package com.dan.eo1partner;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.text.InputType;
 import android.util.Log;
@@ -25,9 +24,6 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.IOException;
-
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -211,49 +207,20 @@ public class MainActivity extends AppCompatActivity {
 
             int a = sharedText.indexOf("Check it out:");
             String url = sharedText.substring(a + "Check it out:".length()).trim();
-            new GetFinalURLTask().execute(url);
+            String imageId = extractImageIdFromGooglePhotosUrl(url);
+
+            if (sharedText.contains("a video"))
+                sendMessage("video," + imageId);
+            else
+                sendMessage("image," + imageId);
 
             intenthandled = true;
         }
     }
 
-    private class GetFinalURLTask extends AsyncTask<String, Void, String> {
-
-        @Override
-        protected String doInBackground(String... urls) {
-            String shortUrl = urls[0];
-            String finalUrl = null;
-
-            OkHttpClient client = new OkHttpClient();
-
-            Request request = new Request.Builder()
-                    .url(shortUrl)
-                    .build();
-            try {
-                okhttp3.Response response = client.newCall(request).execute();
-                String res = response.toString();
-                finalUrl = res.substring(res.indexOf("url=")+("url=".length()), res.length()-1);
-                response.close();
-
-                return finalUrl;
-            } catch (IOException e) {
-                e.printStackTrace();
-                return "";
-             }
-        }
-
-        @Override
-        protected void onPostExecute(String finalUrl) {
-            if (finalUrl.equals(""))
-                txtMsg.setText("Error");
-            else {
-                String imageid = finalUrl.substring(finalUrl.lastIndexOf('/', finalUrl.lastIndexOf('/') - 1) + 1, finalUrl.length() - 1);
-                if (sharedText.contains("a video"))
-                    sendMessage("video," + imageid);
-                else
-                    sendMessage("image," + imageid);
-            }
-        }
+    private String extractImageIdFromGooglePhotosUrl(String url) {
+        String[] parts = url.split("/");
+        return parts[parts.length - 1];
     }
 
     protected void sendMessage(String msg) {
