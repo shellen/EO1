@@ -17,7 +17,7 @@
 - Upload some EO art to your Google Photos album. MP4 videos and still images are supported.
 - Once you boot up your EO1 and it hangs on the "Getting Art" dialog, hit **WINDOWS + B** to open a web browser
 - You need to tell your EO1 to allow side-loading.  Swipe down on the top right and go to Settings > Security.  In there make sure "Unknown Sources" is checked.
-- Go back to the browser and go to this URL: https://github.com/spalt/EO1/releases/download/0.0.8/EO1.apk (you may need to use the mirror, [by clicking here](http://danexchtest11.cloudapp.net/private/releases/EO1.apk))
+- Go back to the browser and go to this URL: https://github.com/shellen/EO1/releases/download/0.0.8/EO1.apk (you may need to use the mirror, [by clicking here](http://danexchtest11.cloudapp.net/private/releases/EO1.apk))
 - When it finishes, install the file by pulling down the notification bar and clicking it, then agreeing to the prompts.
 - Restart/power cycle your EO1
 - Because this APK is designated as a "Home screen replacement", when it boots, it will ask if you want to load the Electric Object app, or the EO1 app.  Select EO1 and choose "Always".
@@ -67,7 +67,7 @@ Partner app:
 
 - A "Partner App" (for Android) runs on your phone or mobile device and allows you to push images or video directly from the <A href="https://play.google.com/store/apps/details?id=com.google.android.apps.photos&hl=en_US&gl=US">Google Photos Android App</a> using the share icon, assuming you are running on the same network as your EO1 device.  Running the Partner App from the Start menu of your phone allows you to skip to the next item in the current slideshow or resume the slideshow after sharing an individual item.  You can also update the current Tag (original Tag will be restored next time the device restarts), adjust brightness and change your slideshow interval.
 - To install, you must allow "Unknown Sources" on your device.
-- Point your device web browser to https://github.com/spalt/EO1/releases/download/0.0.6/EO1-Partner.apk and follow the prompts to install.  You may need to agree to several warnings.
+- Point your device web browser to https://github.com/shellen/EO1/releases/download/0.0.6/EO1-Partner.apk and follow the prompts to install.  You may need to agree to several warnings.
 
 ### New in 0.0.2
 
@@ -85,3 +85,22 @@ Partner app:
 
 - I need more art!  Do you have any?  
 - Questions?  danf879@gmail.com
+
+### Creating an APK from this fork
+
+To create an APK from this fork, follow these steps:
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/shellen/EO1.git
+   cd EO1
+   ```
+
+2. Open the project in Android Studio.
+
+3. Build the APK using Gradle:
+   - In Android Studio, select `Build` from the top menu.
+   - Click on `Build Bundle(s) / APK(s)`.
+   - Select `Build APK(s)`.
+
+4. The APK will be generated and you can find it in the `app/build/outputs/apk/release` directory.
