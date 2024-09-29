@@ -4,6 +4,8 @@
 
 ## Getting started
 
+- This is a WIP and is not finished, *do not try and upload this to your device* it's not ready yet. I will be attempting to add Google Photos support instead of Flickr.
+
 ### Requirements 
 
 - You need a way to connect a keyboard and mouse to your EO1.  I got one of these -- https://www.amazon.com/gp/product/B01C6032G0/ -- and connected my USB keyboard to it, then my USB mouse to the keyboard.
