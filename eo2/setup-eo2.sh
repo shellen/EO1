@@ -102,7 +102,7 @@ yesno "Is this your Electric Objects frame?" || die "Stopped — nothing was cha
 
 # ---------------------------------------------------------------- 4. clear other home apps
 bold "Step 4/6 — Removing other home-screen apps (fixes 'Select a home app')"
-PKGS="$(A shell pm list packages | tr -d '\r' | sed 's/^package://')"
+PKGS="$(A shell pm list packages | tr -d '\r' | sed 's/^package://; s/.*=//')"
 has_pkg() { echo "$PKGS" | grep -qx "$1"; }
 
 for p in $STOCK_PKGS; do
@@ -116,7 +116,7 @@ OTHERS="$( (for p in $OLD_REPLACEMENTS; do echo "$p"; done; echo "$PKGS" | grep 
 for p in $OTHERS; do
     has_pkg "$p" || continue
     if yesno "  Found another frame app '$p'. Uninstall it?"; then
-        A uninstall "$p" >/dev/null 2>&1 && ok "Uninstalled $p" || warn "Couldn't uninstall $p"
+        A uninstall "$p" 2>&1 | grep -q Success && ok "Uninstalled $p" || warn "Couldn't uninstall $p"
     fi
 done
 
@@ -170,7 +170,7 @@ A shell chmod 666 "$CONFIG_REMOTE" >/dev/null 2>&1
 ok "Settings copied"
 
 # Final check: only our app should be left as a home screen.
-LEFT="$(A shell pm list packages -e | tr -d '\r' | sed 's/^package://' | grep -x -e com.electricobjects.app -e com.dan.eo1 || true)"
+LEFT="$(A shell pm list packages -e | tr -d '\r' | sed 's/^package://; s/.*=//' | grep -x -e com.electricobjects.app -e com.dan.eo1 || true)"
 [ -z "$LEFT" ] || warn "Still enabled: $LEFT — the home-app chooser may still appear."
 
 A reboot >/dev/null 2>&1
