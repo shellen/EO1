@@ -7,6 +7,11 @@
   "Show whole photo" with blurred edges), gallery with tap-to-preview, **Show now**, **Remove**,
   multi-select remove, GIF badges (GIFs upload untouched and animate on the frame), Next / Screen / Brightness, and simple settings: picture interval, night
   sleep hours, time zone.
+- **Extras → The New York Times front page**: the phone downloads the Times' daily
+  `scan.pdf` (CORS-open; falls back up to 3 days), renders it with pdf.js, makes a clean JPEG,
+  a glitched JPEG or an animated glitch GIF (gifenc; unchanged pixels transparent, ~5 MB), uploads
+  it and removes the previous front page. Optional "refresh whenever I open this page". Needs the
+  phone online (pdf.js and gifenc load from cdnjs / jsdelivr).
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin
   checked, like uploads). Clears the legacy quiet-hour mirror so "off" sticks.

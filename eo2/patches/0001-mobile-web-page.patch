@@ -625,10 +625,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..a7192f1
+index 0000000..1ce70e9
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,587 @@
+@@ -0,0 +1,767 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -654,6 +654,7 @@ index 0000000..a7192f1
 +  --shadow:none;
 +}}
 +*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
++[hidden]{display:none!important}
 +html,body{margin:0;background:var(--bg);color:var(--ink)}
 +body{font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 +  padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 24px);
@@ -741,6 +742,16 @@ index 0000000..a7192f1
 +.selecting footer{margin-bottom:90px}
 +.sheet .row3{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:8px}
 +.btn.go{background:var(--accent);color:var(--accent-ink)}
++.extras{padding:14px;margin:6px 0}
++.extras h3{margin:0 0 2px;font-size:16px}
++.extras p{margin:0 0 12px;color:var(--muted);font-size:14px}
++.extras .seg{margin-bottom:12px;display:flex}
++.extras .seg button{flex:1}
++.extras .primary{padding:13px;font-size:16px}
++.extras .primary[disabled]{opacity:.6}
++.extras .progress{font-size:13px;color:var(--muted);margin-top:8px;min-height:18px}
++.extras label.auto{display:flex;gap:10px;align-items:center;font-size:14px;margin-top:12px}
++.extras label.auto input{width:20px;height:20px}
 +.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translate(-50%,-40px);
 +  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;
 +  transition:all .25s;z-index:20;max-width:90vw;text-align:center}
@@ -814,6 +825,20 @@ index 0000000..a7192f1
 +    <div class="setlabel"><span>Time zone <small id="tzName"></small></span></div>
 +    <button class="linkbtn" id="tzFix"></button>
 +  </div>
++</div>
++
++<div class="sectionhead" style="margin-top:22px"><h2>Extras</h2></div>
++<div class="card extras" id="nytCard">
++  <h3>The New York Times front page</h3>
++  <p>Today’s print front page, made for the frame. Replaces yesterday’s.</p>
++  <div class="seg" role="group" aria-label="Front page style">
++    <button data-style="clean">Clean</button>
++    <button data-style="glitch">Glitch</button>
++    <button data-style="gif">Animated</button>
++  </div>
++  <button class="primary" id="nytGo">Put today’s front page on the frame</button>
++  <div class="progress" id="nytStatus"></div>
++  <label class="auto"><input type="checkbox" id="nytAuto"> Refresh it whenever I open this page</label>
 +</div>
 +
 +<div class="selbar" id="selbar">
@@ -1208,8 +1233,163 @@ index 0000000..a7192f1
 +    $("tzFix").textContent = "Use my phone’s time zone (" + phoneTz + ")";
 +  }
 +
++  // ---------- extras: NYT front page ----------
++  // Done on the phone: the Times serves its daily scan.pdf with CORS open, the frame's Android 4.4
++  // has no PDF renderer, and the phone is many times faster at the glitch and GIF work.
++  var PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
++  var GIFENC = "https://cdn.jsdelivr.net/npm/gifenc@1.0.3/dist/gifenc.esm.js";
++  var NYT_PREFIX = "nyt-frontpage-";
++  var nytStyle = "gif", nytBusy = false;
++  try { nytStyle = localStorage.getItem("nytStyle") || "gif"; $("nytAuto").checked = localStorage.getItem("nytAuto") === "1"; } catch(e) {}
++  function renderNytStyle(){ Array.prototype.forEach.call(document.querySelectorAll("#nytCard .seg button"), function(b){ b.classList.toggle("sel", b.dataset.style === nytStyle); }); }
++  Array.prototype.forEach.call(document.querySelectorAll("#nytCard .seg button"), function(b){
++    b.onclick = function(){ nytStyle = b.dataset.style; try{localStorage.setItem("nytStyle", nytStyle);}catch(e){} renderNytStyle(); };
++  });
++  renderNytStyle();
++  $("nytAuto").onchange = function(){ try{ localStorage.setItem("nytAuto", this.checked ? "1" : "0"); }catch(e){} };
++  function nytSay(t){ $("nytStatus").textContent = t; }
++  function loadScript(src){
++    return new Promise(function(res, rej){ var s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = function(){ rej(new Error("Couldn’t load " + src.split("/").pop() + " (is the phone online?)")); }; document.head.appendChild(s); });
++  }
++  function ymd(d){ return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); }
++  function fetchFrontPage(){
++    var tries = [0, 1, 2, 3].map(function(i){ var d = new Date(); d.setDate(d.getDate() - i); return d; });
++    return tries.reduce(function(chain, d){
++      return chain.then(function(found){
++        if (found) return found;
++        var url = "https://static01.nyt.com/images/" + ymd(d).replace(/-/g, "/") + "/nytfrontpage/scan.pdf";
++        return fetch(url).then(function(r){ return r.ok ? r.arrayBuffer() : null; }).catch(function(){ return null; })
++          .then(function(buf){ return buf && buf.byteLength > 1000 ? {day: ymd(d), pdf: buf} : null; });
++      });
++    }, Promise.resolve(null)).then(function(found){ if (!found) throw new Error("No front page published in the last few days"); return found; });
++  }
++  function renderPdf(buf){
++    return (window.pdfjsLib ? Promise.resolve() : loadScript(PDFJS + "pdf.min.js")).then(function(){
++      pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js";
++      return pdfjsLib.getDocument({data: new Uint8Array(buf)}).promise;
++    }).then(function(doc){ return doc.getPage(1); }).then(function(page){
++      var v1 = page.getViewport({scale: 1}), scale = Math.max(W / v1.width, H / v1.height);
++      var v = page.getViewport({scale: scale});
++      var big = document.createElement("canvas"); big.width = Math.ceil(v.width); big.height = Math.ceil(v.height);
++      var bctx = big.getContext("2d"); bctx.fillStyle = "#fff"; bctx.fillRect(0, 0, big.width, big.height);
++      return page.render({canvasContext: bctx, viewport: v}).promise.then(function(){
++        var c = document.createElement("canvas"); c.width = W; c.height = H;
++        c.getContext("2d").drawImage(big, -Math.floor((big.width - W) / 2), -Math.floor((big.height - H) / 2));
++        return c;
++      });
++    });
++  }
++  function rng32(seed){ return function(){ seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
++  function rint(r, a, b){ return a + Math.floor(r() * (b - a)); }
++  function rnorm(r){ return Math.sqrt(-2 * Math.log(r() || 1e-9)) * Math.cos(2 * Math.PI * r()); }
++  // Mirror of nyt-frontpage.py: channel split, torn bands, datamosh blocks, scanlines, in one strip.
++  function glitch(base, r, strength, y0, y1){
++    var d = new Uint8ClampedArray(base), rowB = W * 4, tmp = new Uint8ClampedArray(rowB), h = y1 - y0;
++    function roll(y, dx, ch){ // shift row y right by dx; ch = channel or -1 for all
++      dx = ((dx % W) + W) % W; if (!dx) return;
++      var o = y * rowB; tmp.set(d.subarray(o, o + rowB));
++      for (var x = 0; x < W; x++) { var src = ((x - dx + W) % W) * 4, dst = o + x * 4;
++        if (ch < 0) { d[dst] = tmp[src]; d[dst+1] = tmp[src+1]; d[dst+2] = tmp[src+2]; } else d[dst+ch] = tmp[src+ch]; }
++    }
++    var sh = Math.floor(rint(r, 2, 6) * strength), y, i;
++    for (y = y0; y < y1; y++) { roll(y, -sh, 0); roll(y, sh, 2); }
++    var bands = Math.floor(rint(r, 4, 14) * strength);
++    for (i = 0; i < bands; i++) {
++      var bh = rint(r, 4, Math.min(90, Math.floor(h / 3))), by = y0 + rint(r, 0, h - bh), dx = Math.round(rnorm(r) * 60 * strength);
++      var tear = r() < 0.35, ch = rint(r, 0, 3), tdx = rint(r, -30, 30), inv = r() < 0.08;
++      for (y = by; y < by + bh; y++) {
++        roll(y, dx, -1); if (tear) roll(y, tdx, ch);
++        if (inv) for (var o = y * rowB, e = o + rowB; o < e; o += 4) { d[o] = 255 - d[o]; d[o+1] = 255 - d[o+1]; d[o+2] = 255 - d[o+2]; }
++      }
++    }
++    var blocks = Math.floor(rint(r, 0, 5) * strength);
++    for (i = 0; i < blocks; i++) {
++      var bw = rint(r, 60, 400), bk = rint(r, 20, Math.min(160, h - 1)), x0 = rint(r, 0, W - bw), yb = y0 + rint(r, 0, h - bk);
++      var sx = Math.min(Math.max(0, x0 + rint(r, -120, 120)), W - bw), sy = Math.min(Math.max(y0, yb + rint(r, -40, 40)), y1 - bk);
++      for (y = 0; y < bk; y++) d.copyWithin(((yb + y) * W + x0) * 4, ((sy + y) * W + sx) * 4, ((sy + y) * W + sx + bw) * 4);
++    }
++    for (y = y0; y < y1; y += 3) for (var p = y * rowB, q = p + rowB; p < q; p += 4) { d[p] *= 0.86; d[p+1] *= 0.86; d[p+2] *= 0.86; }
++    return d;
++  }
++  function toJpeg(canvas){ return new Promise(function(res){ canvas.toBlob(res, "image/jpeg", 0.9); }); }
++  function makeGif(base, seed, onprog){
++    // Frames are generated and encoded one at a time (a full set would be ~170 MB on the phone).
++    return import(GIFENC).then(function(G){
++      var r = rng32(seed), plan = [{zone: null, delay: 6000}];
++      for (var burst = 0; burst < 3; burst++) {
++        var zh = rint(r, 260, 560), zy = rint(r, 0, H - zh), n = rint(r, 3, 7);
++        for (var k = 0; k < n; k++) { var j = rint(r, -40, 40); plan.push({zone: [Math.max(0, zy + j), Math.min(H, zy + zh + j)], strength: 0.5 + r() * 1.1, delay: rint(r, 50, 110)}); }
++        plan.push({zone: null, delay: rint(r, 2500, 7000)});
++      }
++      var gr = rng32(seed ^ 0x5bd1e995);
++      var first = glitch(base, gr, 1, plan[1].zone[0], plan[1].zone[1]);
++      var sample = new Uint8ClampedArray(base.length * 2); sample.set(base); sample.set(first, base.length);
++      var palette = G.quantize(sample, 255); palette.push([0, 0, 0]); sample = first = null;
++      var T = palette.length - 1, baseIdx = G.applyPalette(base, palette), gif = G.GIFEncoder(), prev = null, i = 0;
++      function step(){
++        if (i >= plan.length) { gif.finish(); return new Blob([gif.bytes()], {type: "image/gif"}); }
++        var f = plan[i], idx = f.zone ? G.applyPalette(glitch(base, gr, f.strength, f.zone[0], f.zone[1]), palette) : baseIdx;
++        if (!prev) gif.writeFrame(idx, W, H, {palette: palette, delay: f.delay, repeat: 0, dispose: 1});
++        else { // unchanged pixels -> transparent, so each frame costs only its strip
++          var out = new Uint8Array(idx.length); for (var p = 0; p < idx.length; p++) out[p] = idx[p] === prev[p] ? T : idx[p];
++          gif.writeFrame(out, W, H, {delay: f.delay, transparent: true, transparentIndex: T, dispose: 1});
++        }
++        prev = idx; i++; if (onprog) onprog(i / plan.length);
++        return new Promise(function(res){ setTimeout(res, 0); }).then(step);
++      }
++      return step();
++    });
++  }
++  function uploadBlob(blob, name, onprog){
++    return new Promise(function(res, rej){
++      var fd = new FormData(); fd.append("file", blob, name);
++      var x = new XMLHttpRequest(); x.open("POST", "/upload");
++      x.upload.onprogress = function(e){ if (e.lengthComputable && onprog) onprog(e.loaded / e.total); };
++      x.onload = function(){ x.status >= 200 && x.status < 300 ? res() : rej(new Error("Upload failed (" + x.status + ")")); };
++      x.onerror = function(){ rej(new Error("Network error")); }; x.send(fd);
++    });
++  }
++  function frontPage(quiet){
++    if (nytBusy) return Promise.resolve();
++    nytBusy = true; $("nytGo").disabled = true;
++    var style = nytStyle, name;
++    nytSay("Getting today’s front page…");
++    return fetchFrontPage().then(function(fp){
++      name = NYT_PREFIX + fp.day + "-" + style + (style === "gif" ? ".gif" : ".jpg");
++      if (files.some(function(f){ return f.name === name; })) { nytSay("Already on the frame (" + fp.day + ")."); return "same"; }
++      nytSay("Rendering the " + fp.day + " page…");
++      return renderPdf(fp.pdf).then(function(canvas){
++        var seed = +fp.day.replace(/-/g, "");
++        if (style === "clean") return toJpeg(canvas);
++        var base = canvas.getContext("2d").getImageData(0, 0, W, H);
++        if (style === "glitch") {
++          var gd = glitch(base.data, rng32(seed), 1.3, 0, H);
++          canvas.getContext("2d").putImageData(new ImageData(gd, W, H), 0, 0); return toJpeg(canvas);
++        }
++        nytSay("Making the animation…");
++        return new Promise(function(r){ setTimeout(r, 30); }).then(function(){ return makeGif(base.data, seed, function(f){ nytSay("Making the animation… " + Math.round(f * 100) + "%"); }); });
++      }).then(function(blob){
++        nytSay("Sending to the frame (" + Math.round(blob.size / 1024) + " KB)…");
++        return uploadBlob(blob, name, function(f){ nytSay("Sending to the frame… " + Math.round(f * 100) + "%"); });
++      }).then(function(){
++        var old = files.filter(function(f){ return f.name.indexOf(NYT_PREFIX) === 0 && f.name !== name; });
++        return Promise.all(old.map(function(f){ return api(fileUrl(f.name) + "/delete", {method: "POST"}).catch(function(){}); }));
++      }).then(function(){ nytSay("Done — the " + fp.day + " front page is in rotation."); if (!quiet) toast("Front page added"); return refreshFiles(); });
++    }).catch(function(e){ nytSay("Couldn’t do it: " + e.message); })
++      .then(function(){ nytBusy = false; $("nytGo").disabled = false; try{ localStorage.setItem("nytLast", String(Date.now())); }catch(e){} });
++  }
++  $("nytGo").onclick = function(){ frontPage(false); };
++  function maybeAutoFrontPage(){
++    if (!$("nytAuto").checked) return;
++    var last = 0; try { last = +localStorage.getItem("nytLast") || 0; } catch(e) {}
++    var today = NYT_PREFIX + ymd(new Date());
++    if (files.some(function(f){ return f.name.indexOf(today) === 0; })) return;
++    if (Date.now() - last < 2 * 3600 * 1000) return;     // not more than every 2 hours while unpublished
++    frontPage(true);
++  }
++
 +  // ---------- go ----------
-+  refreshFiles().then(refreshState);
++  refreshFiles().then(refreshState).then(maybeAutoFrontPage);
 +  setInterval(refreshState, 15000);
 +  document.addEventListener("visibilitychange", function(){ if (!document.hidden) { refreshFiles(); refreshState(); } });
 +})();
