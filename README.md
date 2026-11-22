@@ -26,6 +26,8 @@ albums you've been playing. There are no accounts, no subscription and no cloud 
 - **Control the frame:** next picture, screen on or off, and a brightness slider.
 - **Choose what's on the wall:** switch Photos, Generative art, the NYT front page and Spotify on or
   off in any mix, and choose how often art comes up.
+- **Never fills up.** Old generated images (yesterday's front page, last week's album grid) are
+  cleaned up automatically, and the frame refuses uploads that would nearly fill it.
 - **Simple settings:** how often the picture changes (1 minute to 1 day), night-time sleep hours,
   time zone, and the frame's name.
 - **Add it to your home screen** and it opens like an app.
@@ -43,8 +45,11 @@ albums you've been playing. There are no accounts, no subscription and no cloud 
 
 - **The New York Times front page.** Today's print front page, clean, glitched, or as an
   animated glitch GIF. Your phone fetches and renders it, and it replaces yesterday's.
-- **Spotify.** A grid of the last 9, 12 or 20 albums you played, an animated version where covers
-  fade from one to the next, or a now-playing poster that updates as tracks change.
+- **Spotify, live.** Connect once from your phone and the frame keeps up with your music on its
+  own. Two animated now-playing styles: **Kinetic Type** (a bold typographic poster that re-flows
+  as tracks change) and **Liquid Light** (the cover's colors flowing behind it). Lead with the
+  artist, the song or the date, and let it take over the frame while music plays. There's also a
+  still or animated grid of the albums you've played recently.
   One-time setup: [SPOTIFY-AND-TAILSCALE.md](eo2/SPOTIFY-AND-TAILSCALE.md).
 - **Away from home:** reach the page over [Tailscale](eo2/SPOTIFY-AND-TAILSCALE.md#tailscale-the-phone-page-from-anywhere).
 

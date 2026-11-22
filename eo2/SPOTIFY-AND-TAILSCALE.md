@@ -2,16 +2,15 @@
 
 ## Spotify (Extras → Spotify on the phone page)
 
-Three styles, all made on your phone and sent to the frame:
+Connect once on the phone page and the frame takes over the connection: it checks what's playing
+every few seconds on its own, so it stays current with no phone around.
 
-- **Album grid**: your last 9, 12 or 20 different albums, with the date and the latest album.
-- **Animated**: the same grid as a GIF where one cover at a time fades to an older album.
-- **Now playing**: a poster of the current track (big cover on a blurred backdrop, title, artist,
-  album). It goes on screen right away. Turn on **Follow along while this page is open** and it
-  updates every 30 seconds as tracks change.
-
-Grids replace the previous grid and posters replace the previous poster, so one of each at most is
-in rotation. **Refresh whenever I open this page** keeps the grid current (at most every 3 hours).
+- **Live on the frame**: an animated now-playing page in **Kinetic Type** or **Liquid Light**,
+  leading with the artist, the song or the date. Turn on **Take over the frame while music plays**
+  and it holds the screen while something is playing, then returns to your rotation. When nothing
+  is playing it shows what you last played.
+- **Recently played still**: a grid of your last 9, 12 or 20 albums, or an animated version where
+  covers fade from one to the next. It replaces the previous grid.
 
 ### One-time setup (about 5 minutes)
 

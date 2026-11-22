@@ -32,6 +32,15 @@
   Spotify; the local backend skips switched-off kinds by file-name prefix. `GET /settings` returns
   it; `POST /settings {"sources": {...}}` saves it and rebuilds the rotation. Unit-tested in
   `WallSourcesTest`.
+- **Live music**: `MusicService` keeps the frame's own Spotify connection (the phone hands over the
+  refresh token via `POST /music/connect`), polls now playing every 6-15 s and recent plays every
+  2 min, and serves `GET /music/state`; album art is proxied and cached (`/music/img`). `/music/`
+  is the live page (Kinetic Type, Liquid Light; `?lead=artist|track|date`), added to the rotation
+  as the `music-1` web entry. With take-over on, the music page is pinned on every rotation tick
+  while something plays.
+- **Storage cleanup**: `GeneratedFilesJanitor` keeps the newest file of each generated kind,
+  removes orphaned notes/thumbnails and stale upload temp folders, and caps the art cache; it runs
+  at start, after uploads and hourly. Uploads that would leave under 150 MB free are refused.
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin
   checked, like uploads). Clears the legacy quiet-hour mirror so "off" sticks.

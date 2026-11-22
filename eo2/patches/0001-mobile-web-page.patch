@@ -4772,10 +4772,10 @@ index 0000000..fe05873
 +</html>
 diff --git a/app/src/main/resources/web/music.html b/app/src/main/resources/web/music.html
 new file mode 100644
-index 0000000..f139522
+index 0000000..4e27014
 --- /dev/null
 +++ b/app/src/main/resources/web/music.html
-@@ -0,0 +1,1169 @@
+@@ -0,0 +1,1175 @@
 +<!DOCTYPE html>
 +<html>
 +<head>
@@ -5490,11 +5490,11 @@ index 0000000..f139522
 +    }
 +    function stripOff(i, lu, u, forcedExit) {
 +      var pe = clamp01((lu - 0.15 - i * 0.07) / 1.1);
-+      var off = (1 - easeOutExpo(pe)) * (i % 2 ? 1 : -1) * 980;
++      var off = (1 - easeOutExpo(pe)) * (i % 2 ? 1 : -1) * (COVER + 20);
 +      var ps = clamp01((u - (P - 1.9)) / 1.7);
 +      off += Math.sin(ps * Math.PI) * (i % 2 ? 46 : -46);
 +      off += Math.sin(clock * 0.9 + i * 0.8) * 2.5;
-+      if (forcedExit >= 0) { off += easeInCubic(clamp01((forcedExit - 0.1 - i * 0.04) / 0.7)) * (i % 2 ? -1 : 1) * 1000; }
++      if (forcedExit >= 0) { off += easeInCubic(clamp01((forcedExit - 0.1 - i * 0.04) / 0.7)) * (i % 2 ? -1 : 1) * (COVER + 20); }
 +      return off;
 +    }
 +
@@ -5532,14 +5532,19 @@ index 0000000..f139522
 +        ctx.fillStyle = css(t.hi);
 +        ctx.fillRect(CX + 14, CY + 14 + (1 - easeOutCubic(showBlock)) * 30, COVER, COVER * easeOutCubic(showBlock));
 +      }
++      ctx.save();
++      ctx.beginPath();
++      ctx.rect(CX - 2, CY - 2, COVER + 4, COVER + 4);
++      ctx.clip();
 +      for (i = 0; i < N; i++) {
 +        off = stripOff(i, lu, u, forcedExit);
-+        if (CY + off > H || CY + off + COVER < 0) { continue; }
++        if (Math.abs(off) > COVER + 2) { continue; }
 +        ctx.drawImage(v.cover, i * sw * S, 0, sw * S, COVER * S, CX + i * sw, CY + off, sw, COVER);
 +        ctx.strokeStyle = css(t.fg);
 +        ctx.lineWidth = 2;
 +        ctx.strokeRect(CX + i * sw + 1, CY + off + 1, sw - 2 + (i === N - 1 ? 0 : 2), COVER - 2);
 +      }
++      ctx.restore();
 +      /* column */
 +      var cy = CY - 6;
 +      blit(ctx, o.s1, COLX - o.s1.pad, cy - o.s1.pad);
@@ -5751,7 +5756,8 @@ index 0000000..f139522
 +      v.label = makeLabel(tx.label.toUpperCase(), '500', 13, css(ink, 0.82), 3, sh);
 +      v.date = tx.showDate ? makeLabel(tx.date.toUpperCase(), '400', 12, css(ink, 0.7), 2.4, sh) : null;
 +      var fh = fitWrap(tx.hero, '300', TW, 2, 96, 58);
-+      if (wrap(tx.hero, '300', fh.s, TW).length > 2) { fh = fitWrap(tx.hero, '300', TW, 3, 62, 30); }
++      if (wrap(tx.hero, '300', fh.s, TW).length > 2) { fh = fitWrap(tx.hero, '300', TW, 3, 62, 36); }
++      if (wrap(tx.hero, '300', fh.s, TW).length > 3) { fh = fitWrap(tx.hero, '300', TW, 4, 40, 26); }
 +      v.hero = makeText(fh.lines, '300', fh.s, css(ink), { lh: fh.s * 1.04, shadow: sh });
 +      var f1 = fitWrap(tx.s1, '400', TW, 2, 25, 16);
 +      v.s1 = makeText(f1.lines, '400', f1.s, css(ink, 0.9), { lh: f1.s * 1.2, shadow: sh });
