@@ -22,6 +22,20 @@ STOCK_PKGS="com.electricobjects.app com.electricobjects.updater com.electricobje
 OLD_REPLACEMENTS="com.dan.eo1 com.spalt.eo1"   # earlier community APKs that also claim HOME
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# Connect over Wi-Fi without ever blocking: a stale "offline" connection (the frame rebooted, or an
+# earlier session left one behind) makes `adb wait-for-device` hang forever, so reconnect and poll.
+frame_connect() {
+    local t="$1" i st
+    adb disconnect "$t" >/dev/null 2>&1
+    for i in 1 2 3 4 5; do
+        adb connect "$t" >/dev/null 2>&1
+        st="$(adb -s "$t" get-state 2>/dev/null | tr -d '\r')"
+        [ "$st" = "device" ] && return 0
+        [ "$i" -eq 2 ] && adb kill-server >/dev/null 2>&1   # clears a wedged adb server
+        sleep 3
+    done
+    return 1
+}
 # Pick the APK: if there is more than one, list them and let the user choose (newest first).
 pick_apk() {
     local list n i choice
@@ -102,12 +116,10 @@ fi
 [ -n "$IP" ] || die "No IP address given."
 TARGET="${IP}:5555"
 
-adb disconnect "$TARGET" >/dev/null 2>&1
-adb connect "$TARGET" >"$WORK/c" 2>&1
-grep -qi "connected" "$WORK/c" || die "Couldn't connect to $TARGET: $(cat "$WORK/c")
-  Check the IP and that the frame is powered on."
+echo "  Connecting to $TARGET…"
+frame_connect "$TARGET" || die "Couldn't connect to $TARGET after ~20 seconds.
+  Check the IP and that the frame is powered on and on Wi-Fi."
 A() { adb -s "$TARGET" "$@"; }
-A wait-for-device
 MODEL="$(A shell getprop ro.product.model | tr -d '\r')"
 ANDROID="$(A shell getprop ro.build.version.release | tr -d '\r')"
 ok "Connected: model '$MODEL', Android $ANDROID"

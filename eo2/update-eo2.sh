@@ -16,6 +16,20 @@ set -u
 APP_PKG="com.aphex3k.eo1"
 APP_DIR="/data/data/${APP_PKG}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# Connect over Wi-Fi without ever blocking: a stale "offline" connection (the frame rebooted, or an
+# earlier session left one behind) makes `adb wait-for-device` hang forever, so reconnect and poll.
+frame_connect() {
+    local t="$1" i st
+    adb disconnect "$t" >/dev/null 2>&1
+    for i in 1 2 3 4 5; do
+        adb connect "$t" >/dev/null 2>&1
+        st="$(adb -s "$t" get-state 2>/dev/null | tr -d '\r')"
+        [ "$st" = "device" ] && return 0
+        [ "$i" -eq 2 ] && adb kill-server >/dev/null 2>&1   # clears a wedged adb server
+        sleep 3
+    done
+    return 1
+}
 # Pick the APK: if there is more than one, list them and let the user choose (newest first).
 pick_apk() {
     local list n i choice
@@ -46,9 +60,10 @@ IP="${1:-}"
 if [ -z "$IP" ]; then printf 'Frame IP address: ' >&2; read -r IP </dev/tty; fi
 [ -n "$IP" ] || die "No IP address given."
 T="${IP}:5555"
-adb connect "$T" 2>&1 | grep -qi connected || die "Couldn't connect to $T. Is the frame on and on Wi-Fi?"
+echo "  Connecting to $T…"
+frame_connect "$T" || die "Couldn't reach the frame at $T after ~20 seconds.
+  Check it's powered on and on Wi-Fi (its IP may have changed), then try again."
 A() { adb -s "$T" "$@"; }
-A wait-for-device
 ok "Connected to $(A shell getprop ro.product.model | tr -d '\r') at $IP"
 
 OUT="$(A install -r "$APK" 2>&1)"
