@@ -46,6 +46,11 @@
 - **Storage cleanup**: `GeneratedFilesJanitor` keeps the newest file of each generated kind,
   removes orphaned notes/thumbnails and stale upload temp folders, and caps the art cache; it runs
   at start, after uploads and hourly. Uploads that would leave under 150 MB free are refused.
+- **Up next**: the rotation worker publishes a read-only snapshot of the next ~24 assets after
+  each tick (`MediaManager.upcomingAssets()`); `GET /queue` returns what's on now, what's next
+  (with kind: photo, kept art, NYT, Spotify, live art, live music), the interval, the next change
+  time and the music take-over status. The phone page shows it as a carousel with times, and the
+  library as one horizontal row per source.
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin
   checked, like uploads). Clears the legacy quiet-hour mirror so "off" sticks.

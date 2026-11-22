@@ -186,7 +186,7 @@ index 0000000..6911fb3
 +    }
 +}
 diff --git a/app/src/main/java/com/aphex3k/eo1/MainActivity.java b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
-index b12c5a6..39ea9be 100644
+index b12c5a6..bbfa9ba 100644
 --- a/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 +++ b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 @@ -846,6 +846,7 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
@@ -237,7 +237,71 @@ index b12c5a6..39ea9be 100644
      @Override
      public void showNextImage() {
          if (this.brightnessManager.getShouldTheScreenBeOn()) {
-@@ -6249,10 +6283,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -5528,6 +5562,63 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+         return o;
+     }
+ 
++    @Override
++    public String buildQueueJson() {
++        JsonObject o = new JsonObject();
++        o.add("now", queueItem(mediaManager != null ? mediaManager.getCurrentAsset() : null));
++        JsonArray next = new JsonArray();
++        if (mediaManager != null) {
++            for (MediaAsset a : mediaManager.upcomingAssets()) {
++                next.add(queueItem(a));
++            }
++            o.addProperty("remainingInPass", mediaManager.rotationRemainingInPass());
++            o.addProperty("passTotal", mediaManager.upcomingPassTotal());
++        }
++        o.add("upNext", next);
++        int interval = settingsManager != null && settingsManager.getConfiguration() != null
++                ? Math.max(1, settingsManager.getConfiguration().interval) : 5;
++        o.addProperty("intervalMinutes", interval);
++        o.addProperty("lastChangeAtMs", lastRotationActivityMs);
++        o.addProperty("nextChangeAtMs", lastRotationActivityMs > 0 ? lastRotationActivityMs + interval * 60000L : 0);
++        o.addProperty("serverTime", System.currentTimeMillis());
++        o.addProperty("screenOn", brightnessManager != null && brightnessManager.getShouldTheScreenBeOn());
++        WallSources ws = WallSources.read(getFilesDir());
++        JsonObject music = new JsonObject();
++        music.addProperty("enabled", ws.music);
++        music.addProperty("takeover", ws.music && ws.musicTakeover);
++        music.addProperty("playing", MusicService.get(getFilesDir()).isPlaying());
++        o.add("music", music);
++        return o.toString();
++    }
++
++    private static JsonObject queueItem(@Nullable MediaAsset a) {
++        if (a == null) {
++            return null;
++        }
++        JsonObject i = new JsonObject();
++        i.addProperty("key", a.key());
++        i.addProperty("backendId", a.backendId);
++        i.addProperty("type", mediaTypeName(a.type));
++        String kind;
++        String b = a.backendId == null ? "" : a.backendId;
++        if (b.equals(WallSources.MUSIC_ID)) {
++            kind = "music";
++        } else if (b.startsWith(WallSources.ART_ID_PREFIX)) {
++            kind = "art-live";
++        } else if (a.type == MediaType.WEB) {
++            kind = "web";
++        } else if (a.originalFileName != null && a.localPath != null) {
++            kind = WallSources.kindOf(a.originalFileName);
++        } else {
++            kind = "other";
++        }
++        i.addProperty("kind", kind);
++        if (a.originalFileName != null) {
++            i.addProperty("name", a.originalFileName);
++        }
++        return i;
++    }
++
+     @Override
+     public String buildStateJson() {
+         JsonObject o = new JsonObject();
+@@ -6249,10 +6340,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
                  // Debug-only: "the clip that misbehaves is #600 of 1000", which ?action=next cannot
                  // promise to reach. Checked and parked from this thread, which may read the pool's
                  // key set but never its records; the rotation worker picks the record up.
@@ -253,7 +317,7 @@ index b12c5a6..39ea9be 100644
                  if (!mediaManager.queueAssetDisplay(assetKey)) {
                      return false;
                  }
-@@ -6270,9 +6307,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -6270,9 +6364,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
              case "screen":
                  task = this::toggleScreenOn;
                  break;
@@ -282,7 +346,7 @@ index b12c5a6..39ea9be 100644
                  task = this::showConfigurationUI;
                  break;
 diff --git a/app/src/main/java/com/aphex3k/eo1/MediaManager.java b/app/src/main/java/com/aphex3k/eo1/MediaManager.java
-index 110240e..d16c2d5 100644
+index 110240e..9ffb5ba 100644
 --- a/app/src/main/java/com/aphex3k/eo1/MediaManager.java
 +++ b/app/src/main/java/com/aphex3k/eo1/MediaManager.java
 @@ -293,6 +293,20 @@ public class MediaManager implements MediaManagerInterface, ApiServiceGenerator.
@@ -306,6 +370,46 @@ index 110240e..d16c2d5 100644
          startRotation(activity, false);
      }
  
+@@ -325,6 +339,7 @@ public class MediaManager implements MediaManagerInterface, ApiServiceGenerator.
+                             },
+                             false, afterWebFailure);
+                 } finally {
++                    publishUpcoming();
+                     showNextInFlight.set(false);
+                 }
+             }
+@@ -2179,6 +2194,31 @@ public class MediaManager implements MediaManagerInterface, ApiServiceGenerator.
+         return Math.max(0, pool.size() - poolCursor);
+     }
+ 
++    /** Read-only copy of what comes next in this pass, published by the rotation worker. */
++    private volatile List<MediaAsset> upcoming = Collections.emptyList();
++    private volatile int upcomingPassTotal;
++
++    /** Runs on the rotation worker after each tick, the only thread that may read {@link #pool}. */
++    private void publishUpcoming() {
++        try {
++            int from = Math.min(poolCursor, pool.size());
++            int to = Math.min(pool.size(), from + 24);
++            upcoming = Collections.unmodifiableList(new ArrayList<>(pool.subList(from, to)));
++            upcomingPassTotal = pool.size();
++        } catch (Throwable t) {
++            Log.w(TAG, "publishUpcoming failed: " + t);
++        }
++    }
++
++    /** The next assets in this pass, oldest snapshot at most one tick old. Safe from any thread. */
++    public List<MediaAsset> upcomingAssets() {
++        return upcoming;
++    }
++
++    public int upcomingPassTotal() {
++        return upcomingPassTotal;
++    }
++
+     /** Assets in the rotation pool, from the concurrent key set. Safe to call from any thread. */
+     public int poolKeyCount() {
+         return poolKeys.size();
 diff --git a/app/src/main/java/com/aphex3k/eo1/MusicService.java b/app/src/main/java/com/aphex3k/eo1/MusicService.java
 new file mode 100644
 index 0000000..3ac471c
@@ -1190,11 +1294,25 @@ index 0000000..2293135
 +        }
 +    }
 +}
+diff --git a/app/src/main/java/com/aphex3k/eo1/WebController.java b/app/src/main/java/com/aphex3k/eo1/WebController.java
+index 251f2a9..80ba7a3 100644
+--- a/app/src/main/java/com/aphex3k/eo1/WebController.java
++++ b/app/src/main/java/com/aphex3k/eo1/WebController.java
+@@ -82,6 +82,9 @@ public interface WebController {
+     /** Builds the full {@code /state} JSON document. */
+     String buildStateJson();
+ 
++    /** What's on now and what comes next, for the phone page's "Up next". */
++    String buildQueueJson();
++
+     /**
+      * One-line identity of the running build (version, variant, source commit, signing-key verdict)
+      * for the page header. The certificate's own facts are only in {@code /state}: the server holds
 diff --git a/app/src/main/java/com/aphex3k/eo1/WebServer.java b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-index f6cbeb4..e75608d 100644
+index f6cbeb4..3d0694d 100644
 --- a/app/src/main/java/com/aphex3k/eo1/WebServer.java
 +++ b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-@@ -259,6 +259,36 @@ public class WebServer {
+@@ -259,6 +259,39 @@ public class WebServer {
          if (path.equals("/") || path.equals("/index.html")) {
              return "index";
          }
@@ -1203,6 +1321,9 @@ index f6cbeb4..e75608d 100644
 +        }
 +        if (path.equals("/icon.png")) {
 +            return "icon";
++        }
++        if (path.equals("/queue")) {
++            return "queue";
 +        }
 +        if (path.equals("/music") || path.equals("/music/")) {
 +            return "musicPage";
@@ -1231,7 +1352,7 @@ index f6cbeb4..e75608d 100644
          if (path.equals("/state")) {
              return "state";
          }
-@@ -522,6 +552,15 @@ public class WebServer {
+@@ -522,6 +555,15 @@ public class WebServer {
  
          switch (routeKey) {
              case "index":
@@ -1247,7 +1368,7 @@ index f6cbeb4..e75608d 100644
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
                      return;
-@@ -529,6 +568,131 @@ public class WebServer {
+@@ -529,6 +571,135 @@ public class WebServer {
                  send(os, 200, "text/html; charset=utf-8", renderIndex());
                  break;
  
@@ -1270,6 +1391,10 @@ index f6cbeb4..e75608d 100644
 +                }
 +                break;
 +            }
++
++            case "queue":
++                send(os, 200, "application/json", controller.buildQueueJson());
++                break;
 +
 +            case "musicPage": {
 +                byte[] page = classpathBytes("/web/music.html");
@@ -1379,7 +1504,7 @@ index f6cbeb4..e75608d 100644
              case "state":
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
-@@ -591,6 +755,7 @@ public class WebServer {
+@@ -591,6 +762,7 @@ public class WebServer {
                  }
                  String name = urlDecode(decodePathSegment(path, "/delete"));
                  boolean ok = controller.deleteUploadedFile(name);
@@ -1387,7 +1512,7 @@ index f6cbeb4..e75608d 100644
                  sendJson(os, ok ? 200 : 404, ok ? okJson("deleted") : errorJson("not found"));
                  break;
              }
-@@ -905,6 +1070,14 @@ public class WebServer {
+@@ -905,6 +1077,14 @@ public class WebServer {
              sendJson(os, 500, errorJson("cannot create upload dir"));
              return;
          }
@@ -1402,7 +1527,7 @@ index f6cbeb4..e75608d 100644
          // Unique per-request temp dir so parallel uploads cannot collide on part names or
          // clean each other's in-progress uploads.
          File incoming = new File(uploadDir, "incoming_" + System.nanoTime());
-@@ -941,6 +1114,11 @@ public class WebServer {
+@@ -941,6 +1121,11 @@ public class WebServer {
                  }
              }
  
@@ -1414,7 +1539,7 @@ index f6cbeb4..e75608d 100644
              JsonObject o = new JsonObject();
              o.addProperty("ok", true);
              JsonArray arr = new JsonArray();
-@@ -1031,6 +1209,165 @@ public class WebServer {
+@@ -1031,6 +1216,165 @@ public class WebServer {
       * {@code POST /config/import}). The body is read off the socket with a hard cap before the
       * controller touches it.
       */
@@ -1580,7 +1705,7 @@ index f6cbeb4..e75608d 100644
      private void handleConfigPost(Map<String, String> headers, InputStream is, OutputStream os)
              throws IOException {
          long declared = parseLongLenient(headers.get("content-length"));
-@@ -1208,6 +1545,136 @@ public class WebServer {
+@@ -1208,6 +1552,136 @@ public class WebServer {
  
      // --- rendering ---
  
@@ -1717,7 +1842,7 @@ index f6cbeb4..e75608d 100644
      private String renderIndex() {
          File dir = controller.uploadedDir();
          UploadedMedia.FileInfo[] files = controller.listUploadedFiles();
-@@ -1232,6 +1699,7 @@ public class WebServer {
+@@ -1232,6 +1706,7 @@ public class WebServer {
              sb.append("<p><small>").append(escapeHtml(termsNotice)).append("</small></p>");
          }
          sb.append("<p>").append(escapeHtml(controller.appBuildSummary())).append("</p>");
@@ -1725,7 +1850,7 @@ index f6cbeb4..e75608d 100644
          sb.append("<p><a href=\"/state\">state</a> · <a href=\"/logs\">logs</a> · ")
                  .append("<a href=\"/crashes\">crashes</a> · ")
                  .append("<a href=\"/reports\">reports</a> · ")
-@@ -2156,6 +2624,7 @@ public class WebServer {
+@@ -2156,6 +2631,7 @@ public class WebServer {
              o.addProperty("name", f.name);
              o.addProperty("size", f.size);
              o.addProperty("lastModified", f.lastModified);
@@ -3530,10 +3655,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..2a8e271
+index 0000000..3aabdfb
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1349 @@
+@@ -0,0 +1,1447 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -3706,6 +3831,29 @@ index 0000000..2a8e271
 +.artside .btn{padding:10px}
 +.artname{font-size:14px;color:var(--muted)}
 +.extras .chips.styles .chip{padding:6px 11px;font-size:13px}
++.carousel{display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
++  margin:0 -16px;padding:0 16px 6px;scroll-padding:0 16px;scrollbar-width:none}
++.carousel::-webkit-scrollbar{display:none}
++.carousel > *{scroll-snap-align:start;flex:none}
++.rows .row{margin-bottom:14px}
++.rowhead{display:flex;align-items:baseline;gap:8px;margin:0 2px 6px;font-size:14px;color:var(--muted)}
++.rowhead b{color:var(--ink);font-size:15px}
++.rowhead .pill{background:var(--line);border-radius:999px;padding:1px 8px;font-size:12px}
++.rows .carousel .tile{width:84px}
++.upnext .qi{width:92px;padding:0;background:none;text-align:left;color:var(--ink)}
++.upnext .qart{position:relative;aspect-ratio:9/16;border-radius:10px;overflow:hidden;background:var(--line) center/cover no-repeat;border:1px solid var(--line)}
++.upnext .qi.now .qart{outline:2px solid var(--good);outline-offset:2px}
++.upnext .qart .ql{position:absolute;inset:auto 0 0 0;padding:16px 6px 6px;font-size:11px;font-weight:700;color:#fff;
++  background:linear-gradient(transparent,rgba(0,0,0,.6))}
++.upnext .qart.live-art{background:linear-gradient(135deg,#ff6f61,#7850ff 55%,#3cdcff)}
++.upnext .qart.live-music{background:linear-gradient(160deg,#1d2b3a,#c26b2f)}
++.upnext .qart .qicon{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:30px;opacity:.9}
++.upnext .qwhen{font-size:12px;font-weight:700;margin-top:6px}
++.upnext .qname{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.upnext .qmore{width:92px;aspect-ratio:9/16;border-radius:10px;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;
++  text-align:center;font-size:12px;color:var(--muted);padding:8px}
++.upnote{font-size:13px;color:var(--muted);margin:-2px 2px 8px}
++.upnote:empty{display:none}
 +.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translate(-50%,-40px);
 +  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;
 +  transition:all .25s;z-index:20;max-width:90vw;text-align:center}
@@ -3746,7 +3894,11 @@ index 0000000..2a8e271
 +  </div>
 +</div>
 +
-+<div class="addrow">
++<div class="sectionhead" style="margin-top:6px"><h2>Up next</h2><span class="count" id="upWhen"></span></div>
++<div class="upnote" id="upNote"></div>
++<div class="carousel upnext" id="upNext"></div>
++
++<div class="addrow" style="margin-top:14px">
 +  <button class="primary" id="btnAdd">
 +    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
 +    Add photos
@@ -3760,7 +3912,7 @@ index 0000000..2a8e271
 +
 +
 +<div class="sectionhead"><h2>On rotation <span class="count" id="count"></span></h2><button class="selbtn" id="btnSelect" hidden>Select</button></div>
-+<div class="grid" id="grid"></div>
++<div class="rows" id="grid"></div>
 +<div class="card empty" id="empty" hidden><b>No photos yet</b>Tap “Add photos” to put your first picture on the wall.</div>
 +
 +<div class="sectionhead"><h2>Settings</h2></div>
@@ -3941,6 +4093,7 @@ index 0000000..2a8e271
 +    if (!n) return "";
 +    if (/^spotify-grid-/.test(n)) return "Spotify · Recent albums";
 +    if (/^spotify-nowplaying-/.test(n)) return "Spotify · Now playing";
++    if (/^art-/.test(n)) { var a = n.replace(/^art-/, "").replace(/\.[^.]+$/, "").replace(/-[a-z0-9]{4,9}$/, "").replace(/-/g, " "); return "Kept art" + (a ? " · " + a.replace(/\b\w/g, function(c){ return c.toUpperCase(); }) : ""); }
 +    if (/^nyt-frontpage-/.test(n)) { var m = /(\d{4})-(\d\d)-(\d\d)/.exec(n); return "NYT front page" + (m ? " · " + new Date(+m[1], m[2] - 1, +m[3]).toLocaleDateString(undefined, {month: "short", day: "numeric"}) : ""); }
 +    return n.replace(/\.[^.]+$/, "").replace(/_[a-z0-9]{6,9}$/, "").replace(/[_-]+/g, " ").trim() || n;
 +  }
@@ -4021,28 +4174,47 @@ index 0000000..2a8e271
 +      renderState();
 +    }).catch(function(){});
 +  }
++  function makeTile(f){
++    var t = document.createElement("button");
++    t.className = "tile"; t.dataset.name = f.name; t.setAttribute("aria-label", friendlyName(f.name));
++    if (VIDEO.test(f.name)) {
++      t.innerHTML = '<div class="vid"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Video</div>';
++    } else {
++      var img = document.createElement("img"); img.alt = "";
++      img.dataset.src = thumbUrl(f.name, f.lastModified || 0); img.dataset.full = fileUrl(f.name);
++      t.appendChild(img); if (io) io.observe(img); else loadThumb(img);
++    }
++    if (f.warn) { var b = document.createElement("span"); b.className = "badge warn"; b.textContent = "Can’t show"; t.appendChild(b); }
++    else if (/\.gif$/i.test(f.name)) { var gb = document.createElement("span"); gb.className = "badge gif"; gb.textContent = "GIF"; t.appendChild(gb); }
++    var ck = document.createElement("span"); ck.className = "check"; t.appendChild(ck);
++    if (picked[f.name]) t.classList.add("picked");
++    t.onclick = function(){
++      if (selecting) { picked[f.name] = !picked[f.name]; if (!picked[f.name]) delete picked[f.name]; t.classList.toggle("picked", !!picked[f.name]); renderSelbar(); }
++      else openSheet(f);
++    };
++    return t;
++  }
++  // One horizontal row per source, so a big library doesn't become a long scroll.
++  var ROWS = [
++    {id: "photos", title: "Photos", kinds: ["photos"]},
++    {id: "art", title: "Kept art", kinds: ["art"]},
++    {id: "extras", title: "NYT & Spotify", kinds: ["nyt", "spotify"]}
++  ];
 +  function renderGrid(){
 +    var g = $("grid"); g.innerHTML = "";
-+    pending.forEach(function(p){ g.appendChild(p.el); });
-+    files.forEach(function(f){
-+      var t = document.createElement("button");
-+      t.className = "tile"; t.dataset.name = f.name; t.setAttribute("aria-label", f.name);
-+      if (VIDEO.test(f.name)) {
-+        t.innerHTML = '<div class="vid"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Video</div>';
-+      } else {
-+        var img = document.createElement("img"); img.alt = "";
-+        img.dataset.src = thumbUrl(f.name, f.lastModified || 0); img.dataset.full = fileUrl(f.name);
-+        t.appendChild(img); if (io) io.observe(img); else loadThumb(img);
-+      }
-+      if (f.warn) { var b = document.createElement("span"); b.className = "badge warn"; b.textContent = "Can’t show"; t.appendChild(b); }
-+      else if (/\.gif$/i.test(f.name)) { var gb = document.createElement("span"); gb.className = "badge gif"; gb.textContent = "GIF"; t.appendChild(gb); }
-+      var ck = document.createElement("span"); ck.className = "check"; t.appendChild(ck);
-+      if (picked[f.name]) t.classList.add("picked");
-+      t.onclick = function(){
-+        if (selecting) { picked[f.name] = !picked[f.name]; if (!picked[f.name]) delete picked[f.name]; t.classList.toggle("picked", !!picked[f.name]); renderSelbar(); }
-+        else openSheet(f);
-+      };
-+      g.appendChild(t);
++    ROWS.forEach(function(r){
++      var items = files.filter(function(f){ return r.kinds.indexOf(kindOf(f.name)) >= 0; });
++      var pend = r.id === "photos" ? pending : [];
++      if (!items.length && !pend.length) return;
++      var row = document.createElement("div"); row.className = "row";
++      var head = document.createElement("div"); head.className = "rowhead";
++      var off = r.kinds.every(function(k){ return sources && sources[k] === false; });
++      head.innerHTML = "<b></b><span></span>" + (off ? '<span class="pill">Off</span>' : "");
++      head.firstChild.textContent = r.title; head.children[1].textContent = items.length + pend.length;
++      var car = document.createElement("div"); car.className = "carousel";
++      pend.forEach(function(p){ car.appendChild(p.el); });
++      items.forEach(function(f){ car.appendChild(makeTile(f)); });
++      row.appendChild(head); row.appendChild(car); g.appendChild(row);
 +    });
 +    var n = files.length;
 +    $("count").textContent = n ? "· " + n : "";
@@ -4050,6 +4222,57 @@ index 0000000..2a8e271
 +    if (typeof renderSources === "function" && sources) setTimeout(renderSources, 0);
 +    if (n === 0 && selecting) setSelecting(false);
 +    $("empty").hidden = n > 0 || pending.length > 0;
++  }
++
++  // ---------- up next ----------
++  var queue = null;
++  function clock(ms){ return new Date(ms).toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit"}); }
++  function queueTile(item, label, isNow){
++    var b = document.createElement("button"); b.className = "qi" + (isNow ? " now" : "");
++    var art = document.createElement("div"); art.className = "qart";
++    var name = "";
++    if (item.kind === "art-live") { art.classList.add("live-art"); art.innerHTML = '<div class="qicon">✦</div>'; name = "Generative art · live"; }
++    else if (item.kind === "music") {
++      art.classList.add("live-music");
++      var cur = (music && (music.current || music.last)) || null;
++      if (cur && cur.art) art.style.backgroundImage = 'url("' + musicImg(cur.art) + '")'; else art.innerHTML = '<div class="qicon">♪</div>';
++      name = "Live music" + (cur ? " · " + cur.artist : "");
++    }
++    else if (item.name) { art.style.backgroundImage = VIDEO.test(item.name) ? "" : 'url("' + thumbUrl(item.name) + '")'; name = friendlyName(item.name); }
++    else { art.innerHTML = '<div class="qicon">◻︎</div>'; name = item.backendId || "Web page"; }
++    if (isNow) { var l = document.createElement("div"); l.className = "ql"; l.textContent = "On now"; art.appendChild(l); }
++    var w = document.createElement("div"); w.className = "qwhen"; w.textContent = label;
++    var nm = document.createElement("div"); nm.className = "qname"; nm.textContent = name;
++    b.appendChild(art); b.appendChild(w); b.appendChild(nm);
++    var f = item.name && files.filter(function(x){ return x.name === item.name; })[0];
++    b.onclick = function(){ if (f) openSheet(f); else if (item.kind === "art-live") $("artCard").scrollIntoView({behavior: "smooth", block: "center"}); else if (item.kind === "music") $("spCard").scrollIntoView({behavior: "smooth", block: "center"}); };
++    return b;
++  }
++  function renderQueue(){
++    var box = $("upNext"); box.innerHTML = "";
++    if (!queue) return;
++    var q = queue, step = (q.intervalMinutes || 5) * 60000;
++    // use the frame's clock for "in N min", so a phone with a skewed clock still reads right
++    var now = q.serverTime || Date.now(), off = Date.now() - now;
++    var base = q.nextChangeAtMs && q.nextChangeAtMs > now - 30000 ? q.nextChangeAtMs : now + step;
++    var notes = [];
++    if (q.music && q.music.takeover && q.music.playing) notes.push("Live music is holding the screen while Spotify plays. The rotation resumes when it stops.");
++    if (!q.screenOn) notes.push("The screen is off right now.");
++    $("upNote").textContent = notes.join(" ");
++    var mins = Math.max(0, Math.round((base - now) / 60000));
++    $("upWhen").textContent = "every " + intervalLabel(q.intervalMinutes || 5);
++    if (q.now) box.appendChild(queueTile(q.now, "Showing", true));
++    (q.upNext || []).forEach(function(it, i){
++      var label = i === 0 ? (mins <= 0 ? "Next · any moment" : "Next · in " + mins + " min") : clock(base + i * step + off);
++      box.appendChild(queueTile(it, label, false));
++    });
++    var shown = (q.upNext || []).length, rest = (q.remainingInPass || 0) - shown;
++    var more = document.createElement("div"); more.className = "qmore";
++    more.textContent = rest > 0 ? "+" + rest + " more, then a fresh shuffle" : "Then everything reshuffles for the next pass";
++    box.appendChild(more);
++  }
++  function refreshQueue(){
++    return api("/queue").then(function(j){ queue = j; renderQueue(); }).catch(function(){});
 +  }
 +
 +  // ---------- sheet ----------
@@ -4090,7 +4313,7 @@ index 0000000..2a8e271
 +  // ---------- controls ----------
 +  function control(action, method, msg){
 +    return api("/control?action=" + action, {method: method || "GET"}).then(function(j){
-+      if (j && j.fired) { if (msg) toast(msg); setTimeout(refreshState, 1500); }
++      if (j && j.fired) { if (msg) toast(msg); setTimeout(function(){ refreshState(); refreshQueue(); }, 1500); }
 +      else toast("The frame didn’t accept that");
 +    }).catch(function(){ toast("Can’t reach the frame"); });
 +  }
@@ -4592,7 +4815,7 @@ index 0000000..2a8e271
 +  function spSay(t){ $("spStatus").textContent = t; }
 +  function musicImg(u){ return "/music/img?u=" + encodeURIComponent(u); }
 +  function refreshMusic(){
-+    return api("/music/state").then(function(j){ music = j || {connected: false}; spRender(); return music; })
++    return api("/music/state").then(function(j){ music = j || {connected: false}; spRender(); if (queue) renderQueue(); return music; })
 +      .catch(function(){ spRender(); return music; });
 +  }
 +  function spRender(){
@@ -4875,9 +5098,9 @@ index 0000000..2a8e271
 +  };
 +
 +  // ---------- go ----------
-+  refreshFiles().then(refreshState).then(loadSources).then(refreshMusic).then(function(){ musicPreview(); artLoad(); })
++  refreshFiles().then(refreshState).then(refreshQueue).then(loadSources).then(refreshMusic).then(function(){ musicPreview(); artLoad(); })
 +    .then(maybeAutoFrontPage).then(maybeAutoSpotify);
-+  setInterval(refreshState, 15000);
++  setInterval(function(){ refreshState(); refreshQueue(); }, 15000);
 +  document.addEventListener("visibilitychange", function(){ if (!document.hidden) { refreshFiles(); refreshState(); } });
 +})();
 +</script>

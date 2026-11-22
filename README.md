@@ -21,8 +21,10 @@ albums you've been playing. There are no accounts, no subscription and no cloud 
 - **Add photos and GIFs.** Photos are resized and converted on your phone before they're sent,
   so iPhone HEIC photos work and the frame gets small, ready-to-show files. Choose **Fill** (crop
   to the frame) or **Whole** (the full photo on a blurred background). Animated GIFs play as GIFs.
-- **Manage the rotation.** See everything that's on rotation, tap a picture to preview it,
-  **Show now** or **Remove** it, or select several to remove at once.
+- **See what's coming up.** An Up next carousel shows what's on the frame now and what's next, with
+  times, including the live art and music pages and the extras.
+- **Manage the rotation.** Your library is laid out as one row per source (photos, kept art, NYT
+  and Spotify). Tap a picture to preview it, **Show now** or **Remove** it, or select several.
 - **Control the frame:** next picture, screen on or off, and a brightness slider.
 - **Choose what's on the wall:** switch Photos, Generative art, the NYT front page and Spotify on or
   off in any mix, and choose how often art comes up.
