@@ -60,7 +60,7 @@ IP="${1:-}"
 if [ -z "$IP" ]; then printf 'Frame IP address: ' >&2; read -r IP </dev/tty; fi
 [ -n "$IP" ] || die "No IP address given."
 T="${IP}:5555"
-echo "  Connecting to $T…"
+echo "  Connecting to ${T}…"
 frame_connect "$T" || die "Couldn't reach the frame at $T after ~20 seconds.
   Check it's powered on and on Wi-Fi (its IP may have changed), then try again."
 A() { adb -s "$T" "$@"; }

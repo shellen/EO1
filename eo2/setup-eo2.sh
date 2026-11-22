@@ -116,7 +116,7 @@ fi
 [ -n "$IP" ] || die "No IP address given."
 TARGET="${IP}:5555"
 
-echo "  Connecting to $TARGET…"
+echo "  Connecting to ${TARGET}…"
 frame_connect "$TARGET" || die "Couldn't connect to $TARGET after ~20 seconds.
   Check the IP and that the frame is powered on and on Wi-Fi."
 A() { adb -s "$TARGET" "$@"; }
