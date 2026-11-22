@@ -1,0 +1,10 @@
+{
+    "selectedTimeZoneId": "America/Los_Angeles",
+    "quietHours": ["* 0-6 * * *"],
+    "interval": 5,
+    "updateManifestUrl": "",
+    "updateCheckIntervalMinutes": 120,
+    "backends": [
+        { "type": "local", "id": "local" }
+    ]
+}
