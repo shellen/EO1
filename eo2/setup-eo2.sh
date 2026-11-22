@@ -18,7 +18,7 @@ set -u
 
 APP_PKG="com.aphex3k.eo1"
 CONFIG_REMOTE="/data/data/${APP_PKG}/files/configuration.json"
-STOCK_PKGS="com.electricobjects.app com.geniatech.upgrade"
+STOCK_PKGS="com.electricobjects.app com.electricobjects.updater com.electricobjects.test com.geniatech.upgrade"
 OLD_REPLACEMENTS="com.dan.eo1 com.spalt.eo1"   # earlier community APKs that also claim HOME
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -112,7 +112,7 @@ for p in $STOCK_PKGS; do
 done
 # anything else that looks like an EO replacement app
 OTHERS="$( (for p in $OLD_REPLACEMENTS; do echo "$p"; done; echo "$PKGS" | grep -i -E 'eo1|electric') \
-          | sort -u | grep -vx "$APP_PKG" | grep -v -x -e com.electricobjects.app -e com.geniatech.upgrade || true)"
+          | sort -u | grep -vx "$APP_PKG" | grep -v -e '^com\.electricobjects\.' -e '^com\.geniatech\.' || true)"
 for p in $OTHERS; do
     has_pkg "$p" || continue
     if yesno "  Found another frame app '$p'. Uninstall it?"; then
