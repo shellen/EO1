@@ -1,7 +1,7 @@
 #!/bin/bash
 # install-daily.sh — put the NYT front page on the frame every day, from this Mac.
 #
-#   bash install-daily.sh 192.168.4.33 [gif|glitch|clean]
+#   bash install-daily.sh 192.168.1.50 [gif|glitch|clean]
 #
 # Installs Python packages into ~/.eo2-nyt (a private virtualenv), then a launchd job that runs
 # at 6:10, 9:10 and 12:10 local time. A run that finds today's page already on the frame does

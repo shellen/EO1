@@ -34,7 +34,7 @@ If Spotify answers "refused", open your app in the dashboard → **User Manageme
 own Spotify account's email (apps in development mode only work for listed users).
 
 The connection is stored on that phone's browser, per address: if you open the page from both
-`http://192.168.4.33:8080` and a Tailscale address, connect once on each.
+`http://192.168.1.50:8080` and a Tailscale address, connect once on each.
 
 ## Tailscale: the phone page from anywhere
 
@@ -46,21 +46,21 @@ another always-on device at home does the job. Two ways; either works with every
 Run Tailscale on something that's always on at home (a Mac that stays awake, an Apple TV, a
 Raspberry Pi), and let it route your home network:
 
-- **Mac** (Terminal): `tailscale set --advertise-routes=192.168.4.0/24`
+- **Mac** (Terminal): `tailscale set --advertise-routes=192.168.1.0/24`
   (with the Mac app, the command is `/Applications/Tailscale.app/Contents/MacOS/Tailscale` if
   `tailscale` isn't on your PATH)
-- **Apple TV**: Tailscale app → *Subnet router* → advertise `192.168.4.0/24`
+- **Apple TV**: Tailscale app → *Subnet router* → advertise `192.168.1.0/24`
 
 Then approve the route in the Tailscale admin console (Machines → that device → *Edit route
 settings*). The Tailscale app on your iPhone uses approved routes automatically, so
-`http://192.168.4.33:8080` works wherever you are, with Tailscale on.
+`http://192.168.1.50:8080` works wherever you are, with Tailscale on.
 
 ### B. Tailscale Serve (adds https)
 
 On an always-on Mac with Tailscale:
 
 ```bash
-tailscale serve --bg http://192.168.4.33:8080
+tailscale serve --bg http://192.168.1.50:8080
 ```
 
 This publishes the frame page **only inside your tailnet** at

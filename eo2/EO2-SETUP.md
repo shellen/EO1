@@ -1,4 +1,4 @@
-# EO2 setup — aphex3k/EO1, no keyboard needed
+# EO2 setup: no keyboard needed
 
 ## Updating to a newer build
 
@@ -11,8 +11,8 @@ page is at `/advanced`. App changes are in `patches/`.
 
 1. Make a folder, e.g. `~/EO2`, and put two files in it:
    - `setup-eo2.sh` (from this folder of the repo)
-   - the APK, `eo1-aphex3k-2.0.1.apk` (built from github.com/aphex3k/EO1 @ 4508656, debug-signed;
-     SHA-256 `2f8d7c64c5aed39029858aa78de1f1aa21d186f26f1882ecde70a8731bd23212`)
+   - the frame app APK, `eo2-frame-<version>.apk`, from the
+     [latest release](https://github.com/shellen/EO1/releases/latest)
 2. Open Terminal and run:
 
        cd ~/EO2
@@ -60,7 +60,7 @@ chooser can't come back after reboots or updates.
 
 ## 3. Install
 
-    adb install -r eo1-aphex3k-2.0.1.apk
+    adb install -r eo2-frame-2.0.1.apk
 
 ## 4. Configure without touching the frame
 

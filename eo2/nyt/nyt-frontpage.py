@@ -12,7 +12,7 @@ With --frame IP it uploads the result to the frame's web page and removes the pr
 file, so exactly one front page is ever in rotation.
 
   pip3 install pymupdf pillow numpy
-  python3 nyt-frontpage.py --style gif --frame 192.168.4.33
+  python3 nyt-frontpage.py --style gif --frame 192.168.1.50
 
 For personal, at-home display. The scan is the Times' copyrighted work; don't republish it.
 """

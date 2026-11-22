@@ -817,10 +817,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..735cb3c
+index 0000000..a536721
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1210 @@
+@@ -0,0 +1,1222 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -1159,6 +1159,14 @@ index 0000000..735cb3c
 +    });
 +  }
 +  function fileUrl(n){ return "/files/" + encodeURIComponent(n); }
++  // What people see instead of file names.
++  function friendlyName(n){
++    if (!n) return "";
++    if (/^spotify-grid-/.test(n)) return "Spotify · Recent albums";
++    if (/^spotify-nowplaying-/.test(n)) return "Spotify · Now playing";
++    if (/^nyt-frontpage-/.test(n)) { var m = /(\d{4})-(\d\d)-(\d\d)/.exec(n); return "NYT front page" + (m ? " · " + new Date(+m[1], m[2] - 1, +m[3]).toLocaleDateString(undefined, {month: "short", day: "numeric"}) : ""); }
++    return n.replace(/\.[^.]+$/, "").replace(/_[a-z0-9]{6,9}$/, "").replace(/[_-]+/g, " ").trim() || n;
++  }
 +  function thumbUrl(n, v){ return "/thumb/" + encodeURIComponent(n) + (v ? "?v=" + v : ""); }
 +  // Thumbnails load as tiles scroll into view (our own observer, not loading="lazy").
 +  var io = "IntersectionObserver" in window ? new IntersectionObserver(function(entries){
@@ -1206,7 +1214,7 @@ index 0000000..735cb3c
 +    renderInfo(s);
 +    var cur = media.current || {};
 +    var curName = cur.originalFileName || (cur.key ? String(cur.key).split(/[\/:]/).pop() : "");
-+    $("nowName").textContent = curName || (on ? "—" : "Sleeping");
++    $("nowName").textContent = friendlyName(curName) || (on ? "—" : "Sleeping");
 +    var isLocal = curName && files.some(function(f){ return f.name === curName; });
 +    $("nowThumb").style.backgroundImage = isLocal && !VIDEO.test(curName) ? 'url("' + thumbUrl(curName) + '")' : "";
 +    markCurrent(curName);
@@ -1276,7 +1284,7 @@ index 0000000..735cb3c
 +    } else {
 +      var i = document.createElement("img"); i.className = "preview"; i.src = fileUrl(f.name); m.appendChild(i);
 +    }
-+    $("sheetMeta").textContent = f.name + " · " + Math.max(1, Math.round(f.size / 1024)) + " KB";
++    $("sheetMeta").textContent = friendlyName(f.name) + " · " + Math.max(1, Math.round(f.size / 1024)) + " KB";
 +    var w = $("sheetWarn"); w.hidden = true;
 +    if (f.warn) {
 +      fetch(fileUrl(f.warn)).then(function(r){ return r.text(); }).then(function(txt){
@@ -1724,9 +1732,13 @@ index 0000000..735cb3c
 +    var t = document.createElement("canvas"); t.width = 18; t.height = 32;
 +    var tc = t.getContext("2d"), c = Math.max(18 / iw, 32 / ih);
 +    tc.drawImage(img, (18 - iw * c) / 2, (32 - ih * c) / 2, iw * c, ih * c);
-+    var m = document.createElement("canvas"); m.width = 108; m.height = 192;
-+    var mc = m.getContext("2d"); mc.imageSmoothingEnabled = true; mc.imageSmoothingQuality = "high"; mc.drawImage(t, 0, 0, 108, 192);
-+    ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(m, 0, 0, W, H);
++    // scale back up in small steps; one big jump leaves visible blocks
++    var src = t;
++    [[45, 80], [108, 192], [270, 480]].forEach(function(sz){
++      var m = document.createElement("canvas"); m.width = sz[0]; m.height = sz[1];
++      var mc = m.getContext("2d"); mc.imageSmoothingEnabled = true; mc.imageSmoothingQuality = "high"; mc.drawImage(src, 0, 0, sz[0], sz[1]); src = m;
++    });
++    ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(src, 0, 0, W, H);
 +    ctx.fillStyle = "rgba(0,0,0," + dark + ")"; ctx.fillRect(0, 0, W, H); ctx.restore();
 +  }
 +  function wrapText(ctx, text, x, y, maxW, lineH, maxLines){

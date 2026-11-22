@@ -1,106 +1,92 @@
-# Electric Objects Lives!  Replacement APK
+# EO2 Revival
 
-![](e01.png "e01")
+**Bring an Electric Objects EO2 frame back to life after its servers shut down, and run it from your phone.**
 
-## Getting started
+![The frame and its phone page in light and dark mode](docs/images/hero.jpg)
 
-- This is a WIP and is not finished, *do not try and upload this to your device* it's not ready yet. I will be attempting to add Google Photos support instead of Flickr.
+Electric Objects frames were made to show art from a cloud service that no longer exists. This
+project puts a replacement app on the frame and gives it a phone-friendly web page on your home
+network. You can add photos and GIFs, choose what's in rotation, set how often pictures change and
+when the screen sleeps, and put a few living things on the wall: today's newspaper front page or the
+albums you've been playing. There are no accounts, no subscription and no cloud service in the middle.
 
-### Requirements 
+> The frame app builds on [aphex3k/EO1](https://github.com/aphex3k/EO1) (a rewrite of
+> [spalt/EO1](https://github.com/spalt/EO1)), with a phone page and extras added here. See
+> [Credits](#credits).
 
-- You need a way to connect a keyboard and mouse to your EO1.  I got one of these -- https://www.amazon.com/gp/product/B01C6032G0/ -- and connected my USB keyboard to it, then my USB mouse to the keyboard.
-- Google Photos public URL: You need a public URL of a Google Photos album. For example, you can use this URL: https://photos.app.goo.gl/BCHX2d2fCXCjUEws9
-- Upon setting up the app, it'll ask for the Google Photos public URL. You can either type it in on the setup dialog, or put it into a file named **"config.txt"** and copy it to your EO1's "Downloads" folder. (An easy way to do this is to email yourself the file then log into your email and download it using the EO1's web browser [described below]).
+## What you can do from your phone
 
-### Setup
+![Photo preview, settings and extras on the phone page](docs/images/phone-features.jpg)
 
-- Upload some EO art to your Google Photos album. MP4 videos and still images are supported.
-- Once you boot up your EO1 and it hangs on the "Getting Art" dialog, hit **WINDOWS + B** to open a web browser
-- You need to tell your EO1 to allow side-loading.  Swipe down on the top right and go to Settings > Security.  In there make sure "Unknown Sources" is checked.
-- Go back to the browser and go to this URL: https://github.com/shellen/EO1/releases/download/0.0.8/EO1.apk (you may need to use the mirror, [by clicking here](http://danexchtest11.cloudapp.net/private/releases/EO1.apk))
-- When it finishes, install the file by pulling down the notification bar and clicking it, then agreeing to the prompts.
-- Restart/power cycle your EO1
-- Because this APK is designated as a "Home screen replacement", when it boots, it will ask if you want to load the Electric Object app, or the EO1 app.  Select EO1 and choose "Always".
-- The first time the EO1 is run you will need to specify the information above.  Click OK to save and continue.  **To get back to the configuration screen later, push C on your connected keyboard** 
-- You can now unplug your mouse and keyboard and hang your EO1 back on the wall!
-- See "Partner App" below for instructions on installing the companion app on your Android device.
+- **Add photos and GIFs.** Photos are resized and converted on your phone before they're sent,
+  so iPhone HEIC photos work and the frame gets small, ready-to-show files. Choose **Fill** (crop
+  to the frame) or **Whole** (the full photo on a blurred background). Animated GIFs play as GIFs.
+- **Manage the rotation.** See everything that's on rotation, tap a picture to preview it,
+  **Show now** or **Remove** it, or select several to remove at once.
+- **Control the frame:** next picture, screen on or off, and a brightness slider.
+- **Simple settings:** how often the picture changes (1 minute to 1 day), night-time sleep hours,
+  time zone, and the frame's name.
+- **Add it to your home screen** and it opens like an app.
 
-### New in 0.0.8
+### Extras
 
-- Fixes custom tag ocassionally losing value (take 2)
-- Fixes random dimming during static photo or video display
-- Better error recovery during media download
-- Adds retreiving additional media after #500 -- app will cycle through "pages" of responses from the Google Photos album 
-- Adds video media caching and auto-cache cleanup: video art will be cached and not re-downloaded when possible
+![A Spotify album grid and a now-playing poster on the frame](docs/images/spotify.jpg)
 
-### New in 0.0.7
-Device app:
-- Fixes the custom tag and other settings ocassionally losing values, especially when coming back from quiet hours.
+- **The New York Times front page.** Today's print front page, clean, glitched, or as an
+  animated glitch GIF. Your phone fetches and renders it, and it replaces yesterday's.
+- **Spotify.** A grid of the last 9, 12 or 20 albums you played, an animated version where covers
+  fade from one to the next, or a now-playing poster that updates as tracks change.
+  One-time setup: [SPOTIFY-AND-TAILSCALE.md](eo2/SPOTIFY-AND-TAILSCALE.md).
+- **Away from home:** reach the page over [Tailscale](eo2/SPOTIFY-AND-TAILSCALE.md#tailscale-the-phone-page-from-anywhere).
 
-### New in 0.0.6
+## Set up a frame (about 10 minutes, no keyboard)
 
-Device app:
-- Fixes brightness being reset upon coming back from quiet hours
-  
-Partner app:
-- No changes
- 
-### New in 0.0.5
+The EO2 accepts Android's debugging connection (ADB) over Wi-Fi, so everything happens from a computer
+on the same network. You need a Mac (or Linux, or Windows with WSL) and the frame on your Wi-Fi.
 
-Device app:
-- Checkbox allows you to disable auto-brightness and set it manually
-
-Partner app:
-- Gear icon at top right lets you send new values for brightness, start/end quiet hour, and slideshow interval direct to the device (see 0.0.3 for instructions on installing the partner app)
-
-### New in 0.0.4
-
-Device app:
-- Fixes quiet hours after midnight
-- Fixes image and video pushing via partner app when original resolution is not available
-- Better handling of bad/no network scenarios
-
-Partner app:
-- Handles intents from Google Photos app in a better way (you must upgrade the partner app if you update to 0.0.4 on the device)
-
-### Partner App
-
-- A "Partner App" (for Android) runs on your phone or mobile device and allows you to push images or video directly from the <A href="https://play.google.com/store/apps/details?id=com.google.android.apps.photos&hl=en_US&gl=US">Google Photos Android App</a> using the share icon, assuming you are running on the same network as your EO1 device.  Running the Partner App from the Start menu of your phone allows you to skip to the next item in the current slideshow or resume the slideshow after sharing an individual item.  You can also update the current Tag (original Tag will be restored next time the device restarts), adjust brightness and change your slideshow interval.
-- To install, you must allow "Unknown Sources" on your device.
-- Point your device web browser to https://github.com/shellen/EO1/releases/download/0.0.6/EO1-Partner.apk and follow the prompts to install.  You may need to agree to several warnings.
-
-### New in 0.0.2
-
-- Fixed: low resolution images
-- New: Specify slideshow interval in minutes
-- New: Specify showing your gallery, public gallery (items tagged "ElectricObjectsLives"), or specific tag
-- New: auto-brightness based on light sensor reading
-- New: quiet hours (screen will dim and not display images during this period)
-- New: Top button will dim/un-dim screen
-- New: Space will advance slideshow manually
-- New: C opens Config screen
-- More goodies coming soon :)
-
-### Art/Contact
-
-- I need more art!  Do you have any?  
-- Questions?  danf879@gmail.com
-
-### Creating an APK from this fork
-
-To create an APK from this fork, follow these steps:
-
-1. Clone the repository:
+1. Download `setup-eo2.sh` from [`eo2/`](eo2/) and the frame app (`eo2-frame-*.apk`) from the
+   [latest release](https://github.com/shellen/EO1/releases/latest). Put both in one folder.
+2. In Terminal, from that folder:
+   ```bash
+   bash setup-eo2.sh
    ```
-   git clone https://github.com/shellen/EO1.git
-   cd EO1
-   ```
+   The script installs `adb` if needed (via Homebrew), finds the frame on your network and turns
+   off the original Electric Objects apps, so the "Select a home app" screen doesn't come back.
+   It then asks for your time zone, interval and sleep hours, installs the app and reboots. It
+   asks before every change.
+3. Open `http://<frame-ip>:8080/` on your phone (the script prints the address) and add photos.
 
-2. Open the project in Android Studio.
+To install a newer build later: `bash update-eo2.sh <frame-ip>` with the new APK in the folder.
+Manual steps and troubleshooting: [eo2/EO2-SETUP.md](eo2/EO2-SETUP.md).
 
-3. Build the APK using Gradle:
-   - In Android Studio, select `Build` from the top menu.
-   - Click on `Build Bundle(s) / APK(s)`.
-   - Select `Build APK(s)`.
+**Security note:** the EO2 leaves ADB open on your network with full control of the frame, and the
+phone page has no login. That's fine on a home network you trust. Don't put the frame on public or
+guest Wi-Fi, and don't expose its page to the internet.
 
-4. The APK will be generated and you can find it in the `app/build/outputs/apk/release` directory.
+## What's in this repo
+
+| Path | What it is |
+|---|---|
+| [`eo2/`](eo2/) | Everything for the EO2: setup and update scripts, guides, the phone page patch, the Spotify login bounce page, and an optional Mac script for a daily front page |
+| [`eo2/patches/`](eo2/patches/) | The changes on top of aphex3k/EO1 (phone page, thumbnails, settings endpoint, brightness slider), with build steps |
+| [`docs/images/`](docs/images/) | README images. All the art in them is generated, and the frame data shown is made up |
+| `app/`, `app-partner/` | An earlier, unfinished replacement app for the EO1 and its Android companion, kept for reference. The EO2 setup above doesn't use them |
+
+## Building the frame app
+
+The APK is aphex3k/EO1 with [`eo2/patches/0001-mobile-web-page.patch`](eo2/patches/0001-mobile-web-page.patch)
+applied. Build it with the Android SDK, signing with your own key; see
+[eo2/patches/README.md](eo2/patches/README.md). Keep using the same key for later builds so
+updates install in place.
+
+## Credits
+
+- **[aphex3k/EO1](https://github.com/aphex3k/EO1)**: the frame app this runs on (local uploads,
+  Immich, Flickr, quiet hours, its TLS work for Android 4.4, and much more).
+- **[spalt/EO1](https://github.com/spalt/EO1)** and **Dan Finkelstein**: the original replacement
+  APK that started the revival, and the history of this repo.
+- [pdf.js](https://mozilla.github.io/pdf.js/) and [gifenc](https://github.com/mattdesl/gifenc)
+  are loaded by the phone page for the front page and the GIFs.
+
+Not affiliated with Electric Objects, The New York Times, Spotify or Tailscale. The front-page
+feature is meant for personal display at home; the scan is the Times' copyrighted work.

@@ -3,7 +3,7 @@
 #
 # Usage (from the folder holding this script and the new APK):
 #     bash update-eo2.sh                  # asks for the frame's IP
-#     bash update-eo2.sh 192.168.4.33     # or pass it
+#     bash update-eo2.sh 192.168.1.50     # or pass it
 #
 # Uses the newest .apk in this folder. If the new build is signed with a different key than the
 # one on the frame (e.g. moving from the first debug build to the signed one), Android refuses a
