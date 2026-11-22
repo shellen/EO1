@@ -24,11 +24,20 @@ albums you've been playing. There are no accounts, no subscription and no cloud 
 - **Manage the rotation.** See everything that's on rotation, tap a picture to preview it,
   **Show now** or **Remove** it, or select several to remove at once.
 - **Control the frame:** next picture, screen on or off, and a brightness slider.
+- **Choose what's on the wall:** switch Photos, Generative art, the NYT front page and Spotify on or
+  off in any mix, and choose how often art comes up.
 - **Simple settings:** how often the picture changes (1 minute to 1 day), night-time sleep hours,
   time zone, and the frame's name.
 - **Add it to your home screen** and it opens like an app.
 
 ### Extras
+
+![Eight of the generative art styles](docs/images/generative-art.jpg)
+
+- **Generative art.** Twelve animated styles (watercolor washes, Bauhaus blocks, rolling hills,
+  drifting dots, contour rings, a striped sunset and more) drawn live on the frame. Every time a
+  piece comes up it picks a new style and seed, so it's never the same twice. Pick which styles
+  you like, preview them on your phone, and keep any frame you love as a still.
 
 ![A Spotify album grid and a now-playing poster on the frame](docs/images/spotify.jpg)
 

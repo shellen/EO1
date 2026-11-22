@@ -79,11 +79,163 @@ index b12c5a6..8f23384 100644
              case "config":
                  task = this::showConfigurationUI;
                  break;
+diff --git a/app/src/main/java/com/aphex3k/eo1/WallSources.java b/app/src/main/java/com/aphex3k/eo1/WallSources.java
+new file mode 100644
+index 0000000..a8a6433
+--- /dev/null
++++ b/app/src/main/java/com/aphex3k/eo1/WallSources.java
+@@ -0,0 +1,146 @@
++package com.aphex3k.eo1;
++
++import com.google.gson.JsonObject;
++import com.google.gson.JsonParser;
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.nio.charset.Charset;
++
++/**
++ * Which kinds of things the frame puts in rotation: the user's photos, the generative art page,
++ * the newspaper front page and Spotify images. Stored as {@code wall-sources.json} next to the
++ * uploads folder and edited from the phone page. Uploaded files are sorted into those kinds by
++ * name prefix, which is how the phone page names the files it makes.
++ */
++public final class WallSources {
++
++    public static final String FILE_NAME = "wall-sources.json";
++    public static final String ART_ID_PREFIX = "art-";
++    private static final Charset UTF_8 = Charset.forName("UTF-8");
++
++    public boolean photos = true;
++    public boolean art = false;
++    public boolean nyt = true;
++    public boolean spotify = true;
++    /** How many art entries sit in each rotation cycle (more = art comes up more often). */
++    public int artCount = 1;
++    /** Comma-separated art style ids to choose from; empty = all styles. */
++    public String artStyles = "";
++
++    /** The kind of an uploaded file, from its name. */
++    public static String kindOf(String fileName) {
++        String n = fileName == null ? "" : fileName.toLowerCase(java.util.Locale.US);
++        if (n.startsWith("nyt-frontpage-")) {
++            return "nyt";
++        }
++        if (n.startsWith("spotify-")) {
++            return "spotify";
++        }
++        if (n.startsWith("art-")) {
++            return "art";
++        }
++        return "photos";
++    }
++
++    public boolean allows(String fileName) {
++        String k = kindOf(fileName);
++        if ("nyt".equals(k)) {
++            return nyt;
++        }
++        if ("spotify".equals(k)) {
++            return spotify;
++        }
++        if ("art".equals(k)) {
++            return art;
++        }
++        return photos;
++    }
++
++    /** Reads {@code dir/wall-sources.json}; a missing or unreadable file means the defaults. */
++    public static WallSources read(File dir) {
++        WallSources s = new WallSources();
++        if (dir == null) {
++            return s;
++        }
++        File f = new File(dir, FILE_NAME);
++        if (!f.isFile() || f.length() > 4096) {
++            return s;
++        }
++        FileInputStream in = null;
++        try {
++            in = new FileInputStream(f);
++            byte[] b = new byte[(int) f.length()];
++            int off = 0;
++            while (off < b.length) {
++                int n = in.read(b, off, b.length - off);
++                if (n < 0) {
++                    break;
++                }
++                off += n;
++            }
++            s.apply(JsonParser.parseString(new String(b, 0, off, UTF_8)).getAsJsonObject());
++        } catch (Exception ignored) {
++            // defaults
++        } finally {
++            if (in != null) {
++                try {
++                    in.close();
++                } catch (IOException ignored) {
++                    // best effort
++                }
++            }
++        }
++        return s;
++    }
++
++    /** Copies any recognised fields from {@code o}. */
++    public void apply(JsonObject o) {
++        if (o.has("photos")) {
++            photos = o.get("photos").getAsBoolean();
++        }
++        if (o.has("art")) {
++            art = o.get("art").getAsBoolean();
++        }
++        if (o.has("nyt")) {
++            nyt = o.get("nyt").getAsBoolean();
++        }
++        if (o.has("spotify")) {
++            spotify = o.get("spotify").getAsBoolean();
++        }
++        if (o.has("artStyles")) {
++            String v = o.get("artStyles").getAsString().toLowerCase(java.util.Locale.US);
++            artStyles = v.matches("[a-z0-9,]{0,200}") ? v : "";
++        }
++        if (o.has("artCount")) {
++            int c = o.get("artCount").getAsInt();
++            artCount = c < 1 ? 1 : (c > 6 ? 6 : c);
++        }
++    }
++
++    public JsonObject toJson() {
++        JsonObject o = new JsonObject();
++        o.addProperty("photos", photos);
++        o.addProperty("art", art);
++        o.addProperty("nyt", nyt);
++        o.addProperty("spotify", spotify);
++        o.addProperty("artCount", artCount);
++        o.addProperty("artStyles", artStyles);
++        return o;
++    }
++
++    public void write(File dir) throws IOException {
++        File tmp = new File(dir, FILE_NAME + ".tmp");
++        FileOutputStream out = new FileOutputStream(tmp);
++        try {
++            out.write(toJson().toString().getBytes(UTF_8));
++        } finally {
++            out.close();
++        }
++        if (!tmp.renameTo(new File(dir, FILE_NAME))) {
++            throw new IOException("could not save " + FILE_NAME);
++        }
++    }
++}
 diff --git a/app/src/main/java/com/aphex3k/eo1/WebServer.java b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-index f6cbeb4..6da7090 100644
+index f6cbeb4..11d2d02 100644
 --- a/app/src/main/java/com/aphex3k/eo1/WebServer.java
 +++ b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-@@ -259,6 +259,18 @@ public class WebServer {
+@@ -259,6 +259,21 @@ public class WebServer {
          if (path.equals("/") || path.equals("/index.html")) {
              return "index";
          }
@@ -92,6 +244,9 @@ index f6cbeb4..6da7090 100644
 +        }
 +        if (path.equals("/icon.png")) {
 +            return "icon";
++        }
++        if (path.equals("/art") || path.equals("/art/")) {
++            return "art";
 +        }
 +        if (path.startsWith("/thumb/")) {
 +            return "thumb";
@@ -102,7 +257,7 @@ index f6cbeb4..6da7090 100644
          if (path.equals("/state")) {
              return "state";
          }
-@@ -522,6 +534,15 @@ public class WebServer {
+@@ -522,6 +537,15 @@ public class WebServer {
  
          switch (routeKey) {
              case "index":
@@ -118,7 +273,7 @@ index f6cbeb4..6da7090 100644
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
                      return;
-@@ -529,6 +550,51 @@ public class WebServer {
+@@ -529,6 +553,70 @@ public class WebServer {
                  send(os, 200, "text/html; charset=utf-8", renderIndex());
                  break;
  
@@ -142,7 +297,26 @@ index f6cbeb4..6da7090 100644
 +                break;
 +            }
 +
++            case "art": {
++                byte[] page = classpathBytes("/web/art.html");
++                if (page == null) {
++                    send(os, 404, "text/plain", "not found");
++                    return;
++                }
++                writeHead(os, 200, "text/html; charset=utf-8", page.length);
++                os.write(page);
++                os.flush();
++                break;
++            }
++
 +            case "simpleSettings": {
++                if (method.equals("GET")) {
++                    JsonObject o = new JsonObject();
++                    o.addProperty("ok", true);
++                    o.add("sources", WallSources.read(controller.uploadedDir().getParentFile()).toJson());
++                    sendJson(os, 200, o);
++                    return;
++                }
 +                if (!method.equals("POST")) {
 +                    send(os, 405, "text/plain", "method not allowed");
 +                    return;
@@ -170,7 +344,7 @@ index f6cbeb4..6da7090 100644
              case "state":
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
-@@ -591,6 +657,7 @@ public class WebServer {
+@@ -591,6 +679,7 @@ public class WebServer {
                  }
                  String name = urlDecode(decodePathSegment(path, "/delete"));
                  boolean ok = controller.deleteUploadedFile(name);
@@ -178,7 +352,7 @@ index f6cbeb4..6da7090 100644
                  sendJson(os, ok ? 200 : 404, ok ? okJson("deleted") : errorJson("not found"));
                  break;
              }
-@@ -1031,6 +1098,115 @@ public class WebServer {
+@@ -1031,6 +1120,149 @@ public class WebServer {
       * {@code POST /config/import}). The body is read off the socket with a hard cap before the
       * controller touches it.
       */
@@ -269,6 +443,40 @@ index f6cbeb4..6da7090 100644
 +                return;
 +            }
 +        }
++        if (req.has("sources")) {
++            File dir = controller.uploadedDir().getParentFile();
++            WallSources ws = WallSources.read(dir);
++            try {
++                ws.apply(req.getAsJsonObject("sources"));
++                ws.write(dir);
++            } catch (Exception e) {
++                sendJson(os, 400, errorJson("could not save sources"));
++                return;
++            }
++            // The art page is shown through the frame's web-page source: one entry per slot.
++            JsonArray kept = new JsonArray();
++            JsonArray backends = cfg.has("backends") && cfg.get("backends").isJsonArray()
++                    ? cfg.getAsJsonArray("backends") : new JsonArray();
++            for (int i = 0; i < backends.size(); i++) {
++                JsonObject b = backends.get(i).getAsJsonObject();
++                String bid = b.has("id") ? b.get("id").getAsString() : "";
++                if (!bid.startsWith(WallSources.ART_ID_PREFIX)) {
++                    kept.add(b);
++                }
++            }
++            if (ws.art) {
++                for (int i = 1; i <= ws.artCount; i++) {
++                    JsonObject b = new JsonObject();
++                    b.addProperty("type", "web");
++                    b.addProperty("id", WallSources.ART_ID_PREFIX + i);
++                    b.addProperty("host", "http://127.0.0.1:" + boundPort + "/art/?slot=" + i
++                            + (ws.artStyles.isEmpty() ? "" : "&styles=" + ws.artStyles));
++                    b.addProperty("enabled", true);
++                    kept.add(b);
++                }
++            }
++            cfg.add("backends", kept);
++        }
 +        if (req.has("timeZone")) {
 +            String tz = req.get("timeZone").getAsString();
 +            if (!java.util.Arrays.asList(java.util.TimeZone.getAvailableIDs()).contains(tz)) {
@@ -294,7 +502,7 @@ index f6cbeb4..6da7090 100644
      private void handleConfigPost(Map<String, String> headers, InputStream is, OutputStream os)
              throws IOException {
          long declared = parseLongLenient(headers.get("content-length"));
-@@ -1208,6 +1384,129 @@ public class WebServer {
+@@ -1208,6 +1440,129 @@ public class WebServer {
  
      // --- rendering ---
  
@@ -424,7 +632,7 @@ index f6cbeb4..6da7090 100644
      private String renderIndex() {
          File dir = controller.uploadedDir();
          UploadedMedia.FileInfo[] files = controller.listUploadedFiles();
-@@ -1232,6 +1531,7 @@ public class WebServer {
+@@ -1232,6 +1587,7 @@ public class WebServer {
              sb.append("<p><small>").append(escapeHtml(termsNotice)).append("</small></p>");
          }
          sb.append("<p>").append(escapeHtml(controller.appBuildSummary())).append("</p>");
@@ -432,7 +640,7 @@ index f6cbeb4..6da7090 100644
          sb.append("<p><a href=\"/state\">state</a> · <a href=\"/logs\">logs</a> · ")
                  .append("<a href=\"/crashes\">crashes</a> · ")
                  .append("<a href=\"/reports\">reports</a> · ")
-@@ -2156,6 +2456,7 @@ public class WebServer {
+@@ -2156,6 +2512,7 @@ public class WebServer {
              o.addProperty("name", f.name);
              o.addProperty("size", f.size);
              o.addProperty("lastModified", f.lastModified);
@@ -440,6 +648,1426 @@ index f6cbeb4..6da7090 100644
              arr.add(o);
          }
          return arr.toString();
+diff --git a/app/src/main/java/com/aphex3k/media/local/LocalMediaBackend.java b/app/src/main/java/com/aphex3k/media/local/LocalMediaBackend.java
+index 6f08c5c..144d71c 100644
+--- a/app/src/main/java/com/aphex3k/media/local/LocalMediaBackend.java
++++ b/app/src/main/java/com/aphex3k/media/local/LocalMediaBackend.java
+@@ -67,10 +67,14 @@ public class LocalMediaBackend implements MediaBackend {
+         if (files == null) {
+             return assets;
+         }
++        com.aphex3k.eo1.WallSources sources = com.aphex3k.eo1.WallSources.read(uploadDir.getParentFile());
+         for (File f : files) {
+             if (!f.isFile()) {
+                 continue;
+             }
++            if (!sources.allows(f.getName())) {
++                continue;   // that kind is switched off on the phone page
++            }
+             MediaType type = mediaTypeForExtension(extensionOf(f.getName()));
+             if (type == null) {
+                 continue;
+diff --git a/app/src/main/resources/web/art.html b/app/src/main/resources/web/art.html
+new file mode 100644
+index 0000000..ba6a2b1
+--- /dev/null
++++ b/app/src/main/resources/web/art.html
+@@ -0,0 +1,1395 @@
++<!DOCTYPE html>
++<html>
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
++<title>Art</title>
++<style>
++  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
++  #art { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; display: block; }
++</style>
++</head>
++<body>
++<canvas id="art"></canvas>
++<script>
++(function () {
++  'use strict';
++
++  /* ---------- basics ---------- */
++
++  var LW = 540, LH = 960;
++  var TAU = Math.PI * 2;
++
++  function qs(name) {
++    var m = new RegExp('[?&]' + name + '=([^&#]*)').exec(window.location.search);
++    return m ? decodeURIComponent(m[1]) : null;
++  }
++
++  function now() {
++    return (window.performance && window.performance.now) ? window.performance.now() : new Date().getTime();
++  }
++
++  function mul32(a, b) {
++    var ah = (a >>> 16) & 0xffff, al = a & 0xffff;
++    return ((al * b) + (((ah * b) & 0xffff) << 16)) >>> 0;
++  }
++
++  function hash32(x) {
++    x = x >>> 0;
++    x ^= x >>> 16; x = mul32(x, 0x7feb352d);
++    x ^= x >>> 15; x = mul32(x, 0x846ca68b);
++    x ^= x >>> 16;
++    return x >>> 0;
++  }
++
++  /* Seeded PRNG (mulberry32) with rand(min, max) / pick(arr) helpers */
++  function Rng(seed) { this.s = hash32(seed); }
++  Rng.prototype.next = function () {
++    this.s = (this.s + 0x6D2B79F5) >>> 0;
++    var t = this.s;
++    t = mul32(t ^ (t >>> 15), t | 1);
++    t ^= t + mul32(t ^ (t >>> 7), t | 61);
++    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
++  };
++  Rng.prototype.rand = function (a, b) { return a + (b - a) * this.next(); };
++  Rng.prototype.pick = function (arr) { return arr[Math.floor(this.next() * arr.length)]; };
++  Rng.prototype.shuffle = function (arr) {
++    var a = arr.slice(), i, j, tmp;
++    for (i = a.length - 1; i > 0; i--) { j = Math.floor(this.next() * (i + 1)); tmp = a[i]; a[i] = a[j]; a[j] = tmp; }
++    return a;
++  };
++
++  /* ---------- colour helpers ---------- */
++
++  function hexToRgb(h) {
++    h = h.replace('#', '');
++    if (h.length === 3) { h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2); }
++    var n = parseInt(h, 16);
++    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
++  }
++  function rgbStr(c) { return 'rgb(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ')'; }
++  function rgbaStr(c, a) { return 'rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + a + ')'; }
++  function mixRgb(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
++  function lum(c) {
++    var v = [c[0] / 255, c[1] / 255, c[2] / 255], i;
++    for (i = 0; i < 3; i++) { v[i] = v[i] <= 0.03928 ? v[i] / 12.92 : Math.pow((v[i] + 0.055) / 1.055, 2.4); }
++    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
++  }
++  function ink(hex, a) { var c = hexToRgb(hex); return { c: c, a: a, s: rgbaStr(c, a) }; }
++
++  /* Paper / wash / accent / ink palettes */
++  var PALETTES = [
++    { paper: '#F2B7C7', washes: ['#EF6D95', '#D27DB8', '#8B8CE0'], accents: ['#2B8A7D', '#2A7FB2', '#7FAE62'], ink: ['#2D2D2D', '#242424'] },
++    { paper: '#F1E1C8', washes: ['#D97757', '#C4557E', '#7E78B6'], accents: ['#2E7C7A', '#2F6FB0', '#6FA56D'], ink: ['#2A2A2A', '#3B3230'] },
++    { paper: '#EEE7F2', washes: ['#B58AD5', '#F06B8C', '#6F92D6'], accents: ['#2C7C74', '#2A6BAA', '#7DA15A'], ink: ['#232323', '#2F2A2A'] },
++    { paper: '#D4E4ED', washes: ['#5B8FB9', '#7A6FB8', '#8B78C2'], accents: ['#E07B6A', '#D4A373', '#6BA37B'], ink: ['#1E2A36', '#2A2A3A'] },
++    { paper: '#C9D8E8', washes: ['#4A7BA7', '#6B5DA8', '#8E6BB8'], accents: ['#D4856A', '#C9A86A', '#5A9A6A'], ink: ['#1A2632', '#252535'] },
++    { paper: '#E0E8F0', washes: ['#6A8FC4', '#8B7AC8', '#5A7EB8'], accents: ['#C97A6A', '#B89A5A', '#6A9A7A'], ink: ['#222838', '#2A2A38'] },
++    { paper: '#E5DCF0', washes: ['#9B7BC4', '#7B6BB8', '#6A8AC4'], accents: ['#D98A6A', '#8AB87A', '#5A9AAA'], ink: ['#2A2438', '#322A3A'] },
++    { paper: '#DDD4E8', washes: ['#8A6AB4', '#6A5AA8', '#7A8AC0'], accents: ['#CA7A5A', '#7AAA6A', '#5A8A9A'], ink: ['#28223A', '#302838'] },
++    { paper: '#D0DCE8', washes: ['#4A6A9A', '#6A5A98', '#5A7AAA'], accents: ['#BA7A6A', '#9AAA6A', '#6A8AAA'], ink: ['#1A2232', '#222A3A'] }
++  ];
++
++  /* Five-colour palettes, first entry is the background / paper */
++  var P5 = [
++    [[236, 226, 208], [222, 94, 64], [39, 62, 94], [240, 180, 60], [27, 27, 27]],
++    [[20, 24, 40], [255, 111, 97], [255, 214, 165], [96, 166, 180], [240, 240, 235]],
++    [[245, 238, 225], [46, 105, 90], [216, 140, 88], [30, 40, 48], [200, 190, 170]],
++    [[12, 12, 18], [120, 80, 255], [255, 90, 180], [60, 220, 255], [250, 250, 250]],
++    [[238, 232, 220], [180, 50, 50], [30, 30, 30], [220, 190, 90], [110, 140, 120]],
++    [[25, 40, 60], [240, 200, 120], [220, 110, 80], [120, 170, 190], [245, 235, 220]],
++    [[250, 246, 238], [20, 60, 120], [240, 90, 40], [250, 200, 40], [30, 30, 30]],
++    [[16, 16, 16], [230, 60, 60], [240, 240, 240], [60, 60, 60], [200, 160, 60]]
++  ];
++
++  /* Paper + three inks picked from a palette (inkA, inkB, inkTint) */
++  function makeInkData(rng) {
++    var pal = rng.pick(PALETTES);
++    var d = {
++      pal: pal,
++      paper: { c: hexToRgb(pal.paper), s: pal.paper },
++      inkA: ink(rng.pick(pal.ink), 0.96),
++      inkB: ink(rng.pick(pal.ink), 0.92)
++    };
++    var tint = rng.rand(0, 1) < 0.32 ? rng.pick(pal.accents) : '#2B2B2B';
++    d.inkTint = ink(tint, 0.70);
++    /* occasional colourful variant: an accent and a wash join the inks */
++    if (rng.rand(0, 1) < 0.3) {
++      d.inkTint = ink(rng.pick(pal.accents), 0.85);
++      d.inkB = ink(rng.pick(pal.washes), 0.9);
++    }
++    return d;
++  }
++
++  /* Five-colour palette, sometimes derived from the paper/wash palettes; colours 1..4 shuffled */
++  function makePal5(rng) {
++    var p;
++    if (rng.rand(0, 1) < 0.3) {
++      var q = rng.pick(PALETTES);
++      p = [hexToRgb(q.paper), hexToRgb(q.washes[0]), hexToRgb(q.accents[0]), hexToRgb(q.ink[0]), hexToRgb(q.washes[1])];
++    } else {
++      p = rng.pick(P5).slice();
++    }
++    return [p[0]].concat(rng.shuffle(p.slice(1)));
++  }
++
++  /* Invisible wandering point on a slow Lissajous path, replaces a cursor */
++  function wanderer(rng, x0, x1, y0, y1) {
++    var fx = rng.rand(0.05, 0.11), fy = rng.rand(0.04, 0.09);
++    var px = rng.rand(0, TAU), py = rng.rand(0, TAU), px2 = rng.rand(0, TAU), py2 = rng.rand(0, TAU);
++    return function (t) {
++      var u = 0.5 + 0.5 * (0.8 * Math.sin(t * fx + px) + 0.2 * Math.sin(t * fx * 2.3 + px2));
++      var v = 0.5 + 0.5 * (0.8 * Math.sin(t * fy + py) + 0.2 * Math.sin(t * fy * 1.7 + py2));
++      return { x: x0 + (x1 - x0) * u, y: y0 + (y1 - y0) * v };
++    };
++  }
++
++  /* Groups dots by colour + quantised alpha so each group is one fill */
++  function Buckets() { this.list = []; this.map = {}; }
++  Buckets.prototype.key = function (colorStr, alpha, step) {
++    var a = Math.round(alpha / step) * step;
++    if (a < step) { a = step; }
++    var id = colorStr + '|' + a.toFixed(3);
++    if (!this.map.hasOwnProperty(id)) { this.map[id] = this.list.length; this.list.push({ s: colorStr, a: a }); }
++    return this.map[id];
++  };
++
++  function sortByKey(arr) { arr.sort(function (a, b) { return a.k - b.k; }); }
++
++  function fillDots(ctx, dots, buckets, alphaFn) {
++    var cur = -1, i, d;
++    for (i = 0; i < dots.length; i++) {
++      d = dots[i];
++      if (d.k !== cur) {
++        if (cur >= 0) { ctx.fill(); }
++        cur = d.k;
++        ctx.beginPath();
++        ctx.fillStyle = buckets.list[cur].s;
++        ctx.globalAlpha = alphaFn ? alphaFn(cur, buckets.list[cur].a) : buckets.list[cur].a;
++      }
++      if (d.rr > 0.1) {
++        ctx.moveTo(d.px + d.rr, d.py);
++        ctx.arc(d.px, d.py, d.rr, 0, TAU);
++      }
++    }
++    if (cur >= 0) { ctx.fill(); }
++    ctx.globalAlpha = 1;
++  }
++
++  function ell(ctx, x, y, rx, ry, rot) {
++    ctx.save();
++    ctx.translate(x, y);
++    if (rot) { ctx.rotate(rot); }
++    ctx.scale(rx, ry);
++    ctx.moveTo(1, 0);
++    ctx.arc(0, 0, 1, 0, TAU);
++    ctx.restore();
++  }
++
++  function substeps(dt) { return Math.max(1, Math.min(3, Math.round(dt))); }
++
++  /* ---------- squares: rounded-square grid, a pulsing wandering path, spring physics pushed by a drifting point ---------- */
++  function styleSquares(env) {
++    var ctx = env.ctx, rng = env.rng, D = env.data;
++    var cellSize = rng.rand(32, 44), gap = Math.max(3, cellSize * 0.085), total = cellSize + gap;
++    var corner = cellSize / 6;
++    var cols = Math.ceil(LW / total) + 2, rows = Math.ceil(LH / total) + 2;
++    var ox = -(cols * total - LW) / 2, oy = -(rows * total - LH) / 2;
++    var path = {};
++    function add(c, r) { if (c >= 0 && c < cols && r >= 0 && r < rows) { path[c + ',' + r] = 1; } }
++
++    var cc = Math.floor(rng.rand(3, cols - 3)), cr = Math.floor(rng.rand(0, 3)), step, d, b, i;
++    for (step = 0; step < rows + 15; step++) {
++      if (cc >= 0 && cc < cols && cr >= 0 && cr < rows) {
++        add(cc, cr);
++        if (cc > 0) { add(cc - 1, cr); }
++        if (cc < cols - 1) { add(cc + 1, cr); }
++      }
++      d = rng.rand(0, 1);
++      if (d < 0.6) { cr++; }
++      else if (d < 0.8) { cc = Math.max(2, cc - 1); if (rng.rand(0, 1) > 0.3) { cr++; } }
++      else { cc = Math.min(cols - 3, cc + 1); if (rng.rand(0, 1) > 0.3) { cr++; } }
++    }
++    var keys = Object.keys(path);
++    for (b = 0; b < 10; b++) {
++      var parts = rng.pick(keys).split(',');
++      var bc = +parts[0], br = +parts[1], len = Math.floor(rng.rand(3, 10));
++      for (i = 0; i < len; i++) {
++        add(bc, br);
++        d = rng.rand(0, 4);
++        if (d < 1) { br--; } else if (d < 2) { br++; } else if (d < 3) { bc++; } else { bc--; }
++      }
++    }
++
++    var cells = [], pathCells = [], buckets = new Buckets(), r, c;
++    for (r = 0; r < rows; r++) {
++      for (c = 0; c < cols; c++) {
++        var isPath = !!path[c + ',' + r], v = rng.rand(0, 1);
++        var col = isPath ? (v > 0.5 ? D.inkA : D.inkB) : (v > 0.5 ? D.inkTint : D.inkA);
++        var cell = { hx: ox + c * total, hy: oy + r * total, x: 0, y: 0, vx: 0, vy: 0, color: col.s, phase: rng.rand(0, TAU) };
++        cell.x = cell.hx; cell.y = cell.hy;
++        if (isPath) { pathCells.push(cell); } else { cell.k = buckets.key(col.s, 0.65, 0.05); cells.push(cell); }
++      }
++    }
++    sortByKey(cells);
++    var all = cells.concat(pathCells);
++    var cursor = wanderer(rng, -40, LW + 40, -40, LH + 40);
++    var repel = 4000, repelR = 100;
++
++    function rr(x, y, w, h, q) {
++      ctx.moveTo(x + q, y);
++      ctx.lineTo(x + w - q, y);
++      ctx.quadraticCurveTo(x + w, y, x + w, y + q);
++      ctx.lineTo(x + w, y + h - q);
++      ctx.quadraticCurveTo(x + w, y + h, x + w - q, y + h);
++      ctx.lineTo(x + q, y + h);
++      ctx.quadraticCurveTo(x, y + h, x, y + h - q);
++      ctx.lineTo(x, y + q);
++      ctx.quadraticCurveTo(x, y, x + q, y);
++      ctx.closePath();
++    }
++
++    return function (t, dt) {
++      var m = cursor(t), n = substeps(dt), s, j, ce, dx, dy, dist, f, cur = -1;
++      for (s = 0; s < n; s++) {
++        for (j = 0; j < all.length; j++) {
++          ce = all[j];
++          ce.vx += (ce.hx - ce.x) * 0.1;
++          ce.vy += (ce.hy - ce.y) * 0.1;
++          dx = ce.x + cellSize / 2 - m.x; dy = ce.y + cellSize / 2 - m.y;
++          if (Math.abs(dx) < repelR && Math.abs(dy) < repelR) {
++            dist = Math.sqrt(dx * dx + dy * dy);
++            if (dist < repelR && dist > 0) {
++              f = repel / (dist * dist);
++              if (f > 12) { f = 12; }
++              ce.vx += dx / dist * f; ce.vy += dy / dist * f;
++            }
++          }
++          ce.vx *= 0.8; ce.vy *= 0.8;
++          ce.x += ce.vx; ce.y += ce.vy;
++        }
++      }
++      ctx.fillStyle = D.paper.s;
++      ctx.fillRect(0, 0, LW, LH);
++      for (j = 0; j < cells.length; j++) {
++        ce = cells[j];
++        if (ce.k !== cur) {
++          if (cur >= 0) { ctx.fill(); }
++          cur = ce.k; ctx.beginPath();
++          ctx.fillStyle = buckets.list[cur].s; ctx.globalAlpha = buckets.list[cur].a;
++        }
++        rr(ce.x, ce.y, cellSize, cellSize, corner);
++      }
++      if (cur >= 0) { ctx.fill(); }
++      for (j = 0; j < pathCells.length; j++) {
++        ce = pathCells[j];
++        ctx.beginPath();
++        rr(ce.x, ce.y, cellSize, cellSize, corner);
++        ctx.fillStyle = ce.color;
++        ctx.globalAlpha = 0.75 + 0.2 * (Math.sin(t * 2 + ce.phase) + 1) / 2;
++        ctx.fill();
++      }
++      ctx.globalAlpha = 1;
++    };
++  }
++
++  /* ---------- pointillist: swirling cloud of dots with spring physics ---------- */
++  function stylePointillist(env) {
++    var ctx = env.ctx, rng = env.rng, D = env.data;
++    var sx = LW / 100, sy = LH / 100, smin = Math.min(sx, sy);
++    var twistA = rng.rand(0.07, 0.13), twistB = rng.rand(0.1, 0.2);
++    var spreadX = rng.rand(0.75, 0.95), spreadY = rng.rand(0.5, 0.7);
++    var dots = [], buckets = new Buckets(), i;
++    function addDot(hx, hy, r, col, op) {
++      dots.push({ hx: hx, hy: hy, px: hx, py: hy, vx: 0, vy: 0, rr: r, k: buckets.key(col.s, op, 0.1) });
++    }
++    var main = Math.floor(rng.rand(700, 900));
++    for (i = 0; i < main; i++) {
++      var ang = rng.rand(0, TAU), dist = rng.rand(0, 50);
++      var cx = 50 + Math.cos(ang + dist * twistA) * dist * spreadX;
++      var cy = 50 + Math.sin(ang + dist * twistB) * dist * spreadY;
++      var dfc = Math.sqrt((cx - 50) * (cx - 50) + (cy - 50) * (cy - 50));
++      var sv = Math.max(0.3, 1 - dfc / 60);
++      addDot((cx + rng.rand(-5, 5)) * sx, (cy + rng.rand(-5, 5)) * sy, rng.rand(0.3, 1.2) * sv * smin,
++        rng.pick([D.inkA, D.inkB, D.inkTint, D.inkA, D.inkB]), rng.rand(0.4, 0.9));
++    }
++    for (i = 0; i < 300; i++) {
++      addDot(rng.rand(0, 100) * sx, rng.rand(0, 100) * sy, rng.rand(0.2, 0.6) * smin,
++        rng.pick([D.inkA, D.inkB, D.inkTint]), rng.rand(0.2, 0.5));
++    }
++    sortByKey(dots);
++    var cursor = wanderer(rng, -30, LW + 30, LH * 0.1, LH * 0.9);
++
++    return function (t, dt) {
++      var m = cursor(t), n = substeps(dt), s, j, d, dx, dy, dd, f;
++      for (s = 0; s < n; s++) {
++        for (j = 0; j < dots.length; j++) {
++          d = dots[j];
++          d.vx += (d.hx - d.px) * 0.08; d.vy += (d.hy - d.py) * 0.08;
++          dx = d.px - m.x; dy = d.py - m.y;
++          if (dx < 120 && dx > -120 && dy < 120 && dy > -120) {
++            dd = Math.sqrt(dx * dx + dy * dy);
++            if (dd < 120 && dd > 0) { f = Math.min(10, 3000 / (dd * dd)); d.vx += dx / dd * f; d.vy += dy / dd * f; }
++          }
++          d.vx *= 0.85; d.vy *= 0.85;
++          d.px += d.vx; d.py += d.vy;
++        }
++      }
++      ctx.fillStyle = D.paper.s;
++      ctx.fillRect(0, 0, LW, LH);
++      fillDots(ctx, dots, buckets);
++    };
++  }
++
++  /* ---------- pointillist2: freely floating, wobbling dots of three sizes ---------- */
++  function stylePointillist2(env) {
++    var ctx = env.ctx, rng = env.rng, D = env.data;
++    var dots = [], buckets = new Buckets(), i, phases = [];
++    var speedMul = rng.rand(0.8, 1.3);
++    function group(n, sp0, sp1, r0, r1, cols, o0, o1, w0, w1) {
++      for (var k = 0; k < n; k++) {
++        var a = rng.rand(0, TAU);
++        dots.push({
++          px: rng.rand(0, LW), py: rng.rand(0, LH), rr: rng.rand(r0, r1),
++          sp: rng.rand(sp0, sp1) * speedMul, ang: a, wp: rng.rand(0, TAU), ws: rng.rand(w0, w1),
++          k: buckets.key(rng.pick(cols).s, rng.rand(o0, o1), 0.1)
++        });
++      }
++    }
++    group(Math.floor(rng.rand(500, 650)), 0.1, 0.5, 1, 4, [D.inkA, D.inkB, D.inkTint], 0.3, 0.8, 0.5, 2);
++    group(50, 0.05, 0.2, 4, 8, [D.inkA, D.inkB], 0.2, 0.5, 0.2, 0.8);
++    group(200, 0.2, 0.8, 0.5, 1.5, [D.inkA, D.inkB, D.inkTint], 0.15, 0.4, 1, 3);
++    sortByKey(dots);
++    for (i = 0; i < buckets.list.length; i++) { phases.push(rng.rand(0, TAU)); }
++
++    return function (t, dt) {
++      var j, d, a;
++      for (j = 0; j < dots.length; j++) {
++        d = dots[j];
++        a = d.ang + Math.sin(t * d.ws + d.wp) * 0.3;
++        d.px += Math.cos(a) * d.sp * dt;
++        d.py += Math.sin(a) * d.sp * dt;
++        if (d.px < -d.rr) { d.px = LW + d.rr; } else if (d.px > LW + d.rr) { d.px = -d.rr; }
++        if (d.py < -d.rr) { d.py = LH + d.rr; } else if (d.py > LH + d.rr) { d.py = -d.rr; }
++      }
++      ctx.fillStyle = D.paper.s;
++      ctx.fillRect(0, 0, LW, LH);
++      fillDots(ctx, dots, buckets, function (k, base) { return base * (0.9 + Math.sin(t * 0.5 + phases[k]) * 0.1); });
++    };
++  }
++
++  /* ---------- metricwave: fingerprint-like radial displacement of a dot grid, centre drifts ---------- */
++  function styleMetricwave(env) {
++    var ctx = env.ctx, rng = env.rng, D = env.data;
++    var spacing = rng.rand(16, 21), baseRadius = spacing * 0.25;
++    var frequency = rng.rand(0.010, 0.015), amplitude = rng.rand(18, 26), breathe = rng.rand(1.6, 2.4);
++    var cols = Math.ceil(LW / spacing) + 4, rows = Math.ceil(LH / spacing) + 4;
++    var dots = [], buckets = new Buckets(), r, c;
++    for (r = 0; r < rows; r++) {
++      for (c = 0; c < cols; c++) {
++        var gx = -spacing * 2 + c * spacing, gy = -spacing * 2 + r * spacing;
++        var dx = gx - LW / 2, dy = gy - LH / 2;
++        var sv = 0.85 + 0.3 * Math.sin(Math.sqrt(dx * dx + dy * dy) * 0.005);
++        dots.push({
++          gx: gx + rng.rand(-1, 1), gy: gy + rng.rand(-1, 1), br: (baseRadius + rng.rand(-0.5, 0.5)) * sv,
++          px: 0, py: 0, rr: 0,
++          k: buckets.key(rng.pick([D.inkA, D.inkB, D.inkTint]).s, 0.6 + rng.rand(0, 0.3), 0.1)
++        });
++      }
++    }
++    sortByKey(dots);
++    var cursor = wanderer(rng, LW * 0.1, LW * 0.9, LH * 0.15, LH * 0.85);
++    var center = { x: LW / 2, y: LH / 2 };
++
++    return function (t, dt) {
++      var m = cursor(t), e = 1 - Math.pow(1 - 0.04, dt), j, d, dx, dy, dist, push, inv;
++      center.x += (m.x - center.x) * e;
++      center.y += (m.y - center.y) * e;
++      for (j = 0; j < dots.length; j++) {
++        d = dots[j];
++        dx = d.gx - center.x; dy = d.gy - center.y;
++        dist = Math.sqrt(dx * dx + dy * dy);
++        push = Math.sin(dist * frequency) * amplitude;
++        inv = dist > 0 ? push / dist : 0;
++        d.px = d.gx + dx * inv;
++        d.py = d.gy + dy * inv;
++        d.rr = d.br * (0.5 + 0.5 * (Math.sin(t * breathe + dist * 0.008) + 1) / 2);
++      }
++      ctx.fillStyle = D.paper.s;
++      ctx.fillRect(0, 0, LW, LH);
++      fillDots(ctx, dots, buckets);
++    };
++  }
++
++  /* ---------- fabric: breathing dot grid, dots swell around a drifting point ---------- */
++  function styleFabric(env) {
++    var ctx = env.ctx, rng = env.rng, D = env.data;
++    var spacing = rng.rand(22, 32), baseRadius = spacing / 7, speed = rng.rand(2, 3);
++    var dirX = rng.rand(0.15, 0.45), dirY = rng.rand(0.15, 0.45);
++    var cols = Math.ceil(LW / spacing) + 2, rows = Math.ceil(LH / spacing) + 2;
++    var ox = (LW - (cols - 1) * spacing) / 2, oy = (LH - (rows - 1) * spacing) / 2;
++    var dots = [], buckets = new Buckets(), r, c;
++    for (r = 0; r < rows; r++) {
++      for (c = 0; c < cols; c++) {
++        dots.push({
++          px: ox + c * spacing, py: oy + r * spacing, rr: 0,
++          ph: c * dirX + r * dirY + rng.rand(0, 0.5),
++          k: buckets.key(rng.pick([D.inkA, D.inkB, D.inkTint]).s, 0.6 + rng.rand(0, 0.3), 0.1)
++        });
++      }
++    }
++    sortByKey(dots);
++    var cursor = wanderer(rng, 0, LW, 0, LH), infl = 120;
++
++    return function (t) {
++      var m = cursor(t), j, d, rad, dx, dy, dist;
++      for (j = 0; j < dots.length; j++) {
++        d = dots[j];
++        rad = baseRadius * (0.5 + 0.5 * (Math.sin(t * speed + d.ph) + 1) / 2);
++        dx = d.px - m.x; dy = d.py - m.y;
++        if (dx < infl && dx > -infl && dy < infl && dy > -infl) {
++          dist = Math.sqrt(dx * dx + dy * dy);
++          if (dist < infl) { rad *= 1 + (1 - dist / infl) * 0.8; }
++        }
++        d.rr = rad;
++      }
++      ctx.fillStyle = D.paper.s;
++      ctx.fillRect(0, 0, LW, LH);
++      fillDots(ctx, dots, buckets);
++    };
++  }
++
++  /* ---------- cone: particles stream outward in a widening cone that follows a drifting point ---------- */
++  function styleCone(env) {
++    var ctx = env.ctx, rng = env.rng, D = env.data;
++    var originX = LW * rng.rand(0.35, 0.65), originY = LH * rng.rand(0.78, 0.88);
++    var coneLength = LH * rng.rand(0.75, 0.9), maxConeWidth = LW * rng.rand(0.7, 0.95);
++    var cone = [], amb = [], i;
++    var nCone = Math.floor(rng.rand(320, 380));
++    for (i = 0; i < nCone; i++) {
++      var tt = rng.rand(0, 1);
++      cone.push({
++        t: tt, angle: rng.rand(-0.6, 0.6), r: rng.rand(0, 1),
++        radius: 2 + rng.rand(0, 5) * (1 - tt * 0.5),
++        color: rng.pick([D.inkA, D.inkB]).s,
++        opacity: 0.4 + rng.rand(0, 0.5) * (1 - tt * 0.3),
++        speed: 0.15 + rng.rand(0, 0.25), x: 0, y: 0, g: 0, merged: false
++      });
++    }
++    for (i = 0; i < 100; i++) {
++      amb.push({
++        radius: 1.5 + rng.rand(0, 2.5), color: rng.pick([D.inkA, D.inkB, D.inkTint]).s,
++        opacity: 0.1 + rng.rand(0, 0.15), speed: 2 + rng.rand(0, 3),
++        x: rng.rand(0, LW), y: rng.rand(0, LH)
++      });
++    }
++    var cursor = wanderer(rng, LW * 0.1, LW * 0.9, LH * 0.0, LH * 0.45);
++    var coneAngle = -Math.PI / 2;
++
++    return function (t, dt) {
++      var m = cursor(t), j, k, p, p2, dx, dy, d2, th, intensity, glow, dist;
++      var target = Math.atan2(m.y - originY, m.x - originX);
++      var diff = target - coneAngle;
++      while (diff > Math.PI) { diff -= TAU; }
++      while (diff < -Math.PI) { diff += TAU; }
++      coneAngle += diff * Math.min(1, 0.05 * dt);
++
++      ctx.fillStyle = D.paper.s;
++      ctx.fillRect(0, 0, LW, LH);
++
++      for (j = 0; j < amb.length; j++) {
++        p = amb[j];
++        p.x += Math.sin(t * p.speed + p.y * 0.005) * 1.5 * dt * 0.5;
++        p.y += Math.cos(t * p.speed * 0.7 + p.x * 0.005) * 1.2 * dt * 0.5;
++        if (p.x < -10) { p.x = LW + 10; } else if (p.x > LW + 10) { p.x = -10; }
++        if (p.y < -10) { p.y = LH + 10; } else if (p.y > LH + 10) { p.y = -10; }
++        ctx.beginPath();
++        ctx.arc(p.x, p.y, p.radius, 0, TAU);
++        ctx.fillStyle = p.color; ctx.globalAlpha = p.opacity;
++        ctx.fill();
++      }
++
++      var ca = Math.cos(coneAngle), sa = Math.sin(coneAngle);
++      for (j = 0; j < cone.length; j++) {
++        p = cone[j];
++        p.t += p.speed * 0.006 * dt;
++        if (!p.merged) { p.g += p.t * p.t * 0.15 * dt; }
++        if (p.t > 1) { p.t = 0; p.g = 0; p.merged = false; }
++        var along = p.t * coneLength, wid = p.t * maxConeWidth, spread = coneAngle + p.angle * p.t;
++        var off = (p.r - 0.5) * wid;
++        p.x = originX + ca * along + Math.cos(spread + Math.PI / 2) * off;
++        p.y = originY + sa * along + Math.sin(spread + Math.PI / 2) * off + p.g;
++      }
++      for (j = 0; j < cone.length; j++) {
++        p = cone[j];
++        if (p.merged || p.t < 0.2) { continue; }
++        for (k = j + 1; k < cone.length; k++) {
++          p2 = cone[k];
++          if (p2.merged || p2.t < 0.2) { continue; }
++          dx = p.x - p2.x; dy = p.y - p2.y; d2 = dx * dx + dy * dy;
++          th = (p.radius + p2.radius) * 0.8;
++          if (d2 < th * th) {
++            if (p.radius >= p2.radius) {
++              p2.merged = true; p.radius = Math.min(p.radius + p2.radius * 0.3, 12); p.opacity = Math.min(p.opacity + 0.05, 0.9);
++            } else {
++              p.merged = true; p2.radius = Math.min(p2.radius + p.radius * 0.3, 12); p2.opacity = Math.min(p2.opacity + 0.05, 0.9);
++            }
++            break;
++          }
++        }
++      }
++      for (j = 0; j < cone.length; j++) {
++        p = cone[j];
++        if (p.merged) { continue; }
++        intensity = 1 - p.t * 0.5;
++        glow = 1;
++        dx = p.x - m.x; dy = p.y - m.y;
++        if (dx < 120 && dx > -120 && dy < 120 && dy > -120) {
++          dist = Math.sqrt(dx * dx + dy * dy);
++          if (dist < 120) { glow = 1 + (1 - dist / 120) * 0.8; }
++        }
++        ctx.beginPath();
++        ctx.arc(p.x, p.y, p.radius * intensity * glow, 0, TAU);
++        ctx.fillStyle = p.color;
++        ctx.globalAlpha = Math.min(1, p.opacity * intensity * glow);
++        ctx.fill();
++      }
++      ctx.globalAlpha = 1;
++    };
++  }
++
++  /* ---------- surf: layered coupled waves, skimming seabirds, schools of fish and the odd sea creature ---------- */
++  function drawSkimmer(ctx, sk, t) {
++    var s = sk.size, sp = Math.sin(t * 0.8 + sk.wingPhase) * 0.08, wl;
++    ctx.beginPath();
++    if (sk.birdType === 'pelican') {
++      ctx.moveTo(-s * 2.0, s * (0.1 + sp));
++      ctx.quadraticCurveTo(-s * 1.2, -s * 0.05, -s * 0.5, 0);
++      ctx.lineTo(0, 0); ctx.lineTo(s * 0.5, 0);
++      ctx.quadraticCurveTo(s * 1.2, -s * 0.05, s * 2.0, s * (0.1 - sp));
++      ctx.lineTo(s * 1.8, s * 0.15);
++      ctx.quadraticCurveTo(s * 1.0, s * 0.1, s * 0.3, s * 0.08);
++      ctx.lineTo(0, s * 0.12); ctx.lineTo(-s * 0.3, s * 0.08);
++      ctx.quadraticCurveTo(-s * 1.0, s * 0.1, -s * 1.8, s * 0.15);
++      ctx.closePath();
++      ell(ctx, s * 0.4, 0, s * 0.2, s * 0.12, 0);
++      ctx.moveTo(s * 0.55, s * 0.02); ctx.lineTo(s * 0.95, s * 0.06); ctx.lineTo(s * 0.55, s * 0.08); ctx.closePath();
++    } else if (sk.birdType === 'tern') {
++      ctx.moveTo(-s * 1.8, s * sp * 0.5);
++      ctx.lineTo(-s * 0.8, -s * 0.03); ctx.lineTo(0, 0); ctx.lineTo(s * 0.8, -s * 0.03);
++      ctx.lineTo(s * 1.8, -s * sp * 0.5); ctx.lineTo(s * 1.6, s * 0.05); ctx.lineTo(s * 0.6, s * 0.04);
++      ctx.lineTo(0, s * 0.06); ctx.lineTo(-s * 0.6, s * 0.04); ctx.lineTo(-s * 1.6, s * 0.05);
++      ctx.closePath();
++      ell(ctx, s * 0.25, 0, s * 0.12, s * 0.06, 0);
++    } else {
++      wl = s * (0.15 + sp);
++      ctx.moveTo(-s * 1.6, -wl);
++      ctx.quadraticCurveTo(-s * 0.8, -s * 0.02, 0, 0);
++      ctx.quadraticCurveTo(s * 0.8, -s * 0.02, s * 1.6, -wl + sp * s);
++      ctx.lineTo(s * 1.4, -wl * 0.7);
++      ctx.quadraticCurveTo(s * 0.6, s * 0.04, 0, s * 0.08);
++      ctx.quadraticCurveTo(-s * 0.6, s * 0.04, -s * 1.4, -wl * 0.7 + sp * s);
++      ctx.closePath();
++      ell(ctx, s * 0.2, 0, s * 0.12, s * 0.08, 0);
++    }
++    ctx.fill();
++  }
++
++  function drawCreature(ctx, cr, t) {
++    var s = cr.size, w, fc, fl, wd, tailY;
++    ctx.beginPath();
++    if (cr.type === 'bird') {
++      fc = (t + cr.wobblePhase) % 4;
++      fl = fc < 0.8 ? Math.sin(fc * Math.PI / 0.4) * 0.25 : 0;
++      wd = Math.sin(t * 0.2 + cr.wobblePhase) * 0.06 + fl;
++      if (cr.birdVariant === 'gull-v') {
++        var lift = s * (0.2 + wd * 0.5);
++        ctx.moveTo(-s * 1.8, -lift);
++        ctx.quadraticCurveTo(-s * 1.0, -lift * 0.3, -s * 0.3, 0);
++        ctx.lineTo(0, s * 0.05); ctx.lineTo(s * 0.3, 0);
++        ctx.quadraticCurveTo(s * 1.0, -lift * 0.3, s * 1.8, -lift + wd * s * 0.3);
++        ctx.lineTo(s * 1.6, -lift * 0.6);
++        ctx.quadraticCurveTo(s * 0.8, s * 0.02, s * 0.2, s * 0.08);
++        ctx.lineTo(0, s * 0.1); ctx.lineTo(-s * 0.2, s * 0.08);
++        ctx.quadraticCurveTo(-s * 0.8, s * 0.02, -s * 1.6, -lift * 0.6 + wd * s * 0.2);
++        ctx.closePath();
++        ell(ctx, s * 0.15, 0, s * 0.1, s * 0.07, 0);
++      } else {
++        ctx.moveTo(-s * 1.6, s * wd * 0.8);
++        ctx.quadraticCurveTo(-s * 1.0, -s * (0.1 + wd), -s * 0.4, -s * 0.05);
++        ctx.lineTo(0, 0); ctx.lineTo(s * 0.4, -s * 0.05);
++        ctx.quadraticCurveTo(s * 1.0, -s * (0.1 - wd), s * 1.6, -s * wd * 0.8);
++        ctx.lineTo(s * 1.5, s * (0.02 - wd * 0.5));
++        ctx.quadraticCurveTo(s * 0.8, s * 0.08, s * 0.3, s * 0.06);
++        ctx.lineTo(0, s * 0.1); ctx.lineTo(-s * 0.3, s * 0.06);
++        ctx.quadraticCurveTo(-s * 0.8, s * 0.08, -s * 1.5, s * (0.02 + wd * 0.5));
++        ctx.closePath();
++        ell(ctx, s * 0.15, -s * 0.02, s * 0.12, s * 0.08, 0);
++      }
++    } else if (cr.type === 'dolphin') {
++      w = Math.sin(t * 2 + cr.wobblePhase) * 0.03;
++      ctx.moveTo(s * 1.1, s * w);
++      ctx.quadraticCurveTo(s * 0.85, -s * 0.08, s * 0.7, -s * 0.1);
++      ctx.quadraticCurveTo(s * 0.5, -s * 0.22, s * 0.2, -s * 0.2);
++      ctx.quadraticCurveTo(-s * 0.1, -s * 0.18, -s * 0.3, -s * 0.15);
++      ctx.quadraticCurveTo(-s * 0.6, -s * 0.1, -s * 0.85, s * w * 2);
++      ctx.lineTo(-s * 0.9, s * w * 2);
++      ctx.quadraticCurveTo(-s * 0.5, s * 0.12, -s * 0.1, s * 0.15);
++      ctx.quadraticCurveTo(s * 0.3, s * 0.15, s * 0.6, s * 0.08);
++      ctx.quadraticCurveTo(s * 0.85, s * 0.04, s * 1.1, s * w);
++      ctx.closePath();
++      ctx.moveTo(-s * 0.15, -s * 0.18);
++      ctx.quadraticCurveTo(-s * 0.1, -s * 0.42, -s * 0.35, -s * 0.32);
++      ctx.quadraticCurveTo(-s * 0.35, -s * 0.22, -s * 0.3, -s * 0.15);
++      ctx.closePath();
++      tailY = s * w * 3;
++      ctx.moveTo(-s * 0.85, tailY);
++      ctx.quadraticCurveTo(-s * 1.0, -s * 0.15 + tailY, -s * 1.25, -s * 0.12 + tailY);
++      ctx.quadraticCurveTo(-s * 1.1, tailY, -s * 1.25, s * 0.12 + tailY);
++      ctx.quadraticCurveTo(-s * 1.0, s * 0.15 + tailY, -s * 0.85, tailY);
++      ctx.closePath();
++      ctx.moveTo(s * 0.15, s * 0.1);
++      ctx.quadraticCurveTo(s * 0.0, s * 0.28, -s * 0.2, s * 0.22);
++      ctx.quadraticCurveTo(-s * 0.05, s * 0.15, s * 0.15, s * 0.1);
++      ctx.closePath();
++    } else if (cr.type === 'otter') {
++      w = Math.sin(t * 1.5 + cr.wobblePhase) * 0.05;
++      ctx.moveTo(s * 0.7, 0);
++      ctx.quadraticCurveTo(s * 0.6, -s * 0.15, s * 0.4, -s * 0.18);
++      ctx.quadraticCurveTo(s * 0.1, -s * 0.2, -s * 0.3, -s * 0.15);
++      ctx.quadraticCurveTo(-s * 0.6, -s * 0.1, -s * 0.75, s * w);
++      ctx.lineTo(-s * 0.85, s * w);
++      ctx.quadraticCurveTo(-s * 0.6, s * 0.12, -s * 0.2, s * 0.18);
++      ctx.quadraticCurveTo(s * 0.2, s * 0.2, s * 0.5, s * 0.12);
++      ctx.quadraticCurveTo(s * 0.65, s * 0.06, s * 0.7, 0);
++      ctx.closePath();
++      ell(ctx, s * 0.42, -s * 0.22, s * 0.06, s * 0.05, 0);
++      ell(ctx, -s * 0.1, s * 0.22, s * 0.12, s * 0.06, 0.3);
++      ctx.moveTo(-s * 0.75, s * w);
++      ctx.quadraticCurveTo(-s * 0.9, -s * 0.08, -s * 1.0, s * w);
++      ctx.quadraticCurveTo(-s * 0.9, s * 0.08, -s * 0.75, s * w);
++      ctx.closePath();
++    } else if (cr.type === 'seal') {
++      w = Math.sin(t * 2.2 + cr.wobblePhase) * 0.04;
++      ctx.moveTo(s * 0.65, 0);
++      ctx.quadraticCurveTo(s * 0.55, -s * 0.12, s * 0.35, -s * 0.18);
++      ctx.quadraticCurveTo(s * 0.0, -s * 0.22, -s * 0.35, -s * 0.18);
++      ctx.quadraticCurveTo(-s * 0.6, -s * 0.12, -s * 0.75, s * w);
++      ctx.lineTo(-s * 0.8, s * w);
++      ctx.quadraticCurveTo(-s * 0.55, s * 0.15, -s * 0.2, s * 0.2);
++      ctx.quadraticCurveTo(s * 0.15, s * 0.2, s * 0.4, s * 0.12);
++      ctx.quadraticCurveTo(s * 0.55, s * 0.06, s * 0.65, 0);
++      ctx.closePath();
++      ctx.moveTo(-s * 0.75, s * w - s * 0.02);
++      ctx.quadraticCurveTo(-s * 0.85, -s * 0.12, -s * 1.0, -s * 0.08 + w);
++      ctx.quadraticCurveTo(-s * 0.9, s * w, -s * 1.0, s * 0.08 + w);
++      ctx.quadraticCurveTo(-s * 0.85, s * 0.12, -s * 0.75, s * w + s * 0.02);
++      ctx.closePath();
++      ctx.moveTo(s * 0.15, s * 0.15);
++      ctx.quadraticCurveTo(s * 0.05, s * 0.28, -s * 0.1, s * 0.24);
++      ctx.quadraticCurveTo(s * 0.0, s * 0.18, s * 0.15, s * 0.15);
++      ctx.closePath();
++    } else {
++      ctx.moveTo(s * 0.5, 0);
++      ctx.quadraticCurveTo(s * 0.2, -s * 0.25, -s * 0.2, -s * 0.15);
++      ctx.quadraticCurveTo(-s * 0.4, -s * 0.08, -s * 0.5, 0);
++      ctx.quadraticCurveTo(-s * 0.4, s * 0.08, -s * 0.2, s * 0.15);
++      ctx.quadraticCurveTo(s * 0.2, s * 0.25, s * 0.5, 0);
++      ctx.closePath();
++      ctx.moveTo(-s * 0.45, 0); ctx.lineTo(-s * 0.75, -s * 0.2); ctx.lineTo(-s * 0.55, 0); ctx.lineTo(-s * 0.75, s * 0.2);
++      ctx.closePath();
++    }
++    ctx.fill();
++  }
++
++  function styleSurf(env) {
++    var ctx = env.ctx, rng = env.rng, D = env.data, W = LW, H = LH;
++    var REF = 1440;
++    var freqScale = Math.min(3.5, Math.max(1, REF / W));
++    var ampScale = Math.min(1, Math.max(0.6, W / REF));
++    var waves = [], numWaves = 7, i;
++    for (i = 0; i < numWaves; i++) {
++      var level = i / (numWaves - 1);
++      waves.push({
++        baseY: 0.25 + level * 0.5,
++        amplitude: (20 + level * 70 + rng.rand(-10, 10)) * ampScale,
++        frequency: (0.002 + level * 0.003 + rng.rand(-0.0003, 0.0003)) * freqScale,
++        speed: 0.2 + level * 0.5 + rng.rand(-0.08, 0.08),
++        phase: rng.rand(0, TAU),
++        color: (level < 0.4 ? D.inkTint : (level < 0.7 ? D.inkB : D.inkA)).s,
++        opacity: 0.12 + level * 0.55,
++        thickness: 2 + level * 10,
++        level: level,
++        coupling: 0.3 + Math.sin(level * Math.PI) * 0.4
++      });
++    }
++
++    var skimmers = [];
++    function setBird(sk, roll, ws, dir) {
++      if (roll < 0.4) { sk.birdType = 'pelican'; sk.size = 8 + rng.rand(0, 4); sk.vx = dir * (2.5 + rng.rand(0, 1.5)) * ws; }
++      else if (roll < 0.7) { sk.birdType = 'tern'; sk.size = 4 + rng.rand(0, 2); sk.vx = dir * (3.5 + rng.rand(0, 2)) * ws; }
++      else { sk.birdType = 'gull'; sk.size = 5 + rng.rand(0, 3); sk.vx = dir * (3 + rng.rand(0, 1.5)) * ws; }
++    }
++    for (i = 0; i < 25; i++) {
++      var ti = Math.floor(rng.rand(2, numWaves)), wv = waves[ti], roll = rng.rand(0, 1), right = rng.rand(0, 1) > 0.5;
++      var sk = {
++        x: rng.rand(0, W), y: wv.baseY * H + rng.rand(-20, 20), vx: 0, vy: 0, size: 5,
++        color: wv.color, opacity: 0.25 + rng.rand(0, 0.4), life: rng.rand(0, 80), maxLife: 80 + rng.rand(0, 120),
++        targetWaveIdx: ti, birdType: 'gull', wingPhase: rng.rand(0, TAU), flipX: !right
++      };
++      setBird(sk, roll, wv.speed, right ? 1 : -1);
++      skimmers.push(sk);
++    }
++
++    var perts = [], creatures = [], schoolId = 0;
++
++    function waveY(wave, idx, x, t) {
++      var baseY = wave.baseY * H;
++      var sv = Math.sin(x * wave.frequency + t * wave.speed + wave.phase);
++      if (idx === 0) { sv = sv < 0 ? -Math.pow(-sv, 0.7) : Math.pow(sv, 1.4); }
++      var y = baseY + sv * wave.amplitude;
++      y += Math.sin(x * wave.frequency * 2.5 + t * wave.speed * 0.6 + wave.phase * 1.3) * wave.amplitude * 0.25;
++      y += Math.sin(x * wave.frequency * 4 + t * wave.speed * 0.4 + wave.phase * 2.1) * wave.amplitude * 0.1;
++      if (idx > 0 && idx < numWaves - 1) {
++        var pw = waves[idx - 1], nw = waves[idx + 1];
++        var py = pw.baseY * H + Math.sin(x * pw.frequency + t * pw.speed + pw.phase) * pw.amplitude;
++        var ny = nw.baseY * H + Math.sin(x * nw.frequency + t * nw.speed + nw.phase) * nw.amplitude;
++        y += ((py + ny) / 2 - y) * wave.coupling * 0.15;
++      }
++      for (var k = 0; k < perts.length; k++) {
++        var p = perts[k], dx = x - p.x, dy = baseY - p.y, dist = Math.sqrt(dx * dx + dy * dy);
++        if (dist < 300) {
++          var ts = t - p.time;
++          y += (1 - dist / 300) * p.strength * Math.cos(ts * 4) * Math.exp(-ts * p.decay) * (1 - wave.level * 0.5);
++        }
++      }
++      return y;
++    }
++    function tanh(v) { var e = Math.exp(2 * v); return (e - 1) / (e + 1); }
++    function mouseInf(y, x, m, wave) {
++      var dx = x - m.x, dy = y - m.y, dist = Math.sqrt(dx * dx + dy * dy);
++      if (dist < 180) { return y + (-tanh(dy / 40)) * (1 - dist / 180) * 35 * (1 - wave.level * 0.3) * wave.opacity; }
++      return y;
++    }
++
++    function spawn(x, y, t) {
++      perts.push({ x: x, y: y, time: t, strength: 40, decay: 0.8 });
++      var isBird = y < H * 0.2, type, size, speed, roll2;
++      if (isBird) { type = 'bird'; size = rng.rand(12, 22); speed = rng.rand(0.6, 1.2); }
++      else {
++        roll2 = rng.rand(0, 1);
++        if (roll2 < 0.04) { type = 'dolphin'; size = rng.rand(22, 38); speed = rng.rand(0.8, 1.4); }
++        else if (roll2 < 0.1) { type = 'otter'; size = rng.rand(14, 22); speed = rng.rand(0.4, 0.7); }
++        else if (roll2 < 0.2) { type = 'seal'; size = rng.rand(18, 28); speed = rng.rand(0.5, 0.9); }
++        else { type = 'fish'; size = rng.rand(0, 1) < 0.9 ? rng.rand(3, 7) : rng.rand(7, 12); speed = rng.rand(0.15, 0.35); }
++      }
++      var ang = rng.rand(0, TAU), sid = type === 'fish' ? schoolId++ : -1;
++      var count = type === 'fish' ? Math.floor(rng.rand(3, 9)) : 1;
++      for (var k = 0; k < count; k++) {
++        var isF = type === 'fish';
++        var fa = ang + (isF ? rng.rand(-0.3, 0.3) : 0);
++        var ym = isBird ? 0.3 : (type === 'otter' ? 0.4 : 0.6);
++        var cIdx = rng.rand(0, 1) < 0.5 ? D.inkA : D.inkB;
++        creatures.push({
++          x: x + (isF ? rng.rand(-20, 20) : 0), y: y + (isF ? rng.rand(-15, 15) : 0),
++          vx: Math.cos(fa) * speed, vy: Math.sin(fa) * speed * ym, type: type,
++          size: size * (isF ? rng.rand(0.7, 1.3) : 1), rotation: 0, flipX: Math.cos(fa) < 0,
++          life: 0, maxLife: 600 + rng.rand(0, 400), c: cIdx.c, ca: cIdx.a, color: cIdx.s,
++          wobblePhase: rng.rand(0, TAU), turnTime: rng.rand(0.35, 0.45), hasTurned: false, flashTime: -1,
++          schoolId: sid, birdVariant: rng.rand(0, 1) < 0.5 ? 'gull-v' : 'soaring'
++        });
++      }
++    }
++
++    function flock(t, dt) {
++      var fish = [], schools = {}, k, j, f, o;
++      for (k = 0; k < creatures.length; k++) { if (creatures[k].type === 'fish') { fish.push(creatures[k]); } }
++      for (k = 0; k < fish.length; k++) {
++        f = fish[k];
++        if (!schools[f.schoolId]) { schools[f.schoolId] = []; }
++        schools[f.schoolId].push(f);
++      }
++      for (var sidKey in schools) {
++        if (!schools.hasOwnProperty(sidKey)) { continue; }
++        var sc = schools[sidKey], turn = false;
++        for (k = 0; k < sc.length; k++) { if (!sc[k].hasTurned && sc[k].life / sc[k].maxLife >= sc[k].turnTime) { turn = true; } }
++        if (turn) {
++          var sgn = rng.rand(0, 1) > 0.5 ? 1 : -1;
++          for (k = 0; k < sc.length; k++) {
++            f = sc[k];
++            if (!f.hasTurned) {
++              var a = Math.atan2(f.vy, f.vx) + sgn * Math.PI / 3, spd = Math.sqrt(f.vx * f.vx + f.vy * f.vy);
++              f.vx = Math.cos(a) * spd * 0.8; f.vy = Math.sin(a) * spd * 0.8;
++              f.hasTurned = true; f.flashTime = t;
++            }
++          }
++        }
++      }
++      for (k = 0; k < fish.length; k++) {
++        f = fish[k];
++        var sx = 0, sy = 0, sn = 0, ax = 0, ay = 0, an = 0, cx = 0, cy = 0, cn = 0;
++        for (j = 0; j < fish.length; j++) {
++          o = fish[j];
++          if (o === f) { continue; }
++          var dx = o.x - f.x, dy = o.y - f.y, dist = Math.sqrt(dx * dx + dy * dy);
++          var same = f.schoolId >= 0 && f.schoolId === o.schoolId, dm = same ? 1.5 : 1, wgt = same ? 2 : 1;
++          if (dist < 20 && dist > 0) { sx -= dx / dist; sy -= dy / dist; sn++; }
++          if (dist < 50 * dm) { ax += o.vx * wgt; ay += o.vy * wgt; an += wgt; }
++          if (dist < 70 * dm) { cx += o.x * wgt; cy += o.y * wgt; cn += wgt; }
++        }
++        if (sn > 0) { f.vx += (sx / sn) * 0.008 * dt; f.vy += (sy / sn) * 0.008 * dt; }
++        if (an > 0) { f.vx += (ax / an - f.vx) * 0.006 * dt; f.vy += (ay / an - f.vy) * 0.006 * dt; }
++        if (cn > 0) { f.vx += (cx / cn - f.x) * 0.003 * dt; f.vy += (cy / cn - f.y) * 0.003 * dt; }
++        var sp = Math.sqrt(f.vx * f.vx + f.vy * f.vy);
++        if (sp > 0.4) { f.vx = f.vx / sp * 0.4; f.vy = f.vy / sp * 0.4; }
++        else if (sp < 0.1 && sp > 0) { f.vx = f.vx / sp * 0.1; f.vy = f.vy / sp * 0.1; }
++        if (Math.abs(f.vx) > 0.1) { f.flipX = f.vx < 0; }
++      }
++    }
++
++    var cursor = wanderer(rng, -40, W + 40, H * 0.3, H * 0.85);
++    var nextSpawn = rng.rand(0.5, 2);
++    var xs = [], step = 6;
++    for (i = -10; i <= W + 10; i += step) { xs.push(i); }
++    if (xs[xs.length - 1] < W + 10) { xs.push(W + 10); }
++
++    return function (t, dt) {
++      var m = cursor(t), j, k, wave, y, sk;
++      if (t >= nextSpawn) {
++        if (creatures.length < 50) {
++          var sy = rng.rand(0, 1) < 0.15 ? rng.rand(0.04, 0.18) * H : rng.rand(0.35, 0.92) * H;
++          spawn(rng.rand(0.1, 0.9) * W, sy, t);
++        }
++        nextSpawn = t + rng.rand(3, 8);
++      }
++      for (j = perts.length - 1; j >= 0; j--) { if (t - perts[j].time >= 5) { perts.splice(j, 1); } }
++
++      ctx.fillStyle = D.paper.s;
++      ctx.fillRect(0, 0, W, H);
++
++      for (j = 0; j < numWaves; j++) {
++        wave = waves[j];
++        ctx.beginPath();
++        ctx.moveTo(-10, H + 10);
++        for (k = 0; k < xs.length; k++) {
++          y = mouseInf(waveY(wave, j, xs[k], t), xs[k], m, wave);
++          ctx.lineTo(xs[k], y);
++        }
++        ctx.lineTo(W + 10, H + 10);
++        ctx.closePath();
++        ctx.fillStyle = wave.color;
++        ctx.globalAlpha = wave.opacity;
++        ctx.fill();
++        ctx.strokeStyle = wave.color;
++        ctx.lineWidth = wave.thickness * 0.4;
++        ctx.globalAlpha = wave.opacity * 0.5;
++        ctx.stroke();
++      }
++
++      var srng = new Rng(env.seed + Math.floor(t * 8));
++      for (j = 0; j < skimmers.length; j++) {
++        sk = skimmers[j];
++        wave = waves[sk.targetWaveIdx];
++        var ty = waveY(wave, sk.targetWaveIdx, sk.x, t) - sk.size * 2;
++        sk.vy += (ty - sk.y) * 0.03 * dt;
++        sk.vy *= Math.pow(0.9, dt);
++        sk.x += sk.vx * dt; sk.y += sk.vy * dt; sk.life += dt;
++        var mdx = sk.x - m.x, mdy = sk.y - m.y, md = Math.sqrt(mdx * mdx + mdy * mdy);
++        if (md < 150 && md > 0) { var push = (150 - md) * 0.02 * dt; sk.x += mdx / md * push; sk.y += mdy / md * push * 0.5; }
++        if (sk.life > sk.maxLife || sk.x > W + 40 || sk.x < -40) {
++          sk.targetWaveIdx = Math.floor(srng.rand(2, numWaves));
++          var nw = waves[sk.targetWaveIdx], gr = srng.rand(0, 1) > 0.5;
++          sk.x = gr ? srng.rand(-40, -10) : W + srng.rand(10, 40);
++          sk.y = nw.baseY * H + srng.rand(-15, 15);
++          sk.flipX = !gr;
++          var r2 = srng.rand(0, 1);
++          if (r2 < 0.4) { sk.birdType = 'pelican'; sk.size = 8 + srng.rand(0, 4); sk.vx = (gr ? 1 : -1) * (2.5 + srng.rand(0, 1.5)) * nw.speed; }
++          else if (r2 < 0.7) { sk.birdType = 'tern'; sk.size = 4 + srng.rand(0, 2); sk.vx = (gr ? 1 : -1) * (3.5 + srng.rand(0, 2)) * nw.speed; }
++          else { sk.birdType = 'gull'; sk.size = 5 + srng.rand(0, 3); sk.vx = (gr ? 1 : -1) * (3 + srng.rand(0, 1.5)) * nw.speed; }
++          sk.vy = 0; sk.life = 0; sk.maxLife = 80 + srng.rand(0, 120);
++          sk.color = nw.color; sk.wingPhase = srng.rand(0, TAU);
++        }
++        ctx.save();
++        ctx.translate(sk.x, sk.y);
++        if (sk.flipX) { ctx.scale(-1, 1); }
++        ctx.globalAlpha = sk.opacity * (1 - (sk.life / sk.maxLife) * 0.3);
++        ctx.fillStyle = sk.color;
++        drawSkimmer(ctx, sk, t);
++        ctx.restore();
++      }
++
++      flock(t, dt);
++      for (j = creatures.length - 1; j >= 0; j--) {
++        var cr = creatures[j];
++        cr.life += dt;
++        if (cr.x < -80 || cr.x > W + 80 || cr.y < -80 || cr.y > H + 80) { creatures.splice(j, 1); continue; }
++        var water = H * 0.25;
++        if (cr.type !== 'bird') {
++          if (cr.y < water + 50 && cr.vy < 0) { cr.vy = Math.abs(cr.vy) * 0.3; }
++          if (cr.y < water) { cr.y = water; cr.vy = Math.abs(cr.vy) * 0.5 + 0.2; }
++        }
++        var ox = 0, oy = 0;
++        if (cr.type === 'fish') {
++          var sf = 1.5 + (1 - cr.size / 20) * 0.5, sa = Math.sqrt(cr.size) * 0.25;
++          var pa = Math.atan2(cr.vy, cr.vx) + Math.PI / 2, ph = Math.sin(t * sf + cr.wobblePhase);
++          ox = Math.cos(pa) * ph * sa; oy = Math.sin(pa) * ph * sa;
++        }
++        cr.x += (cr.vx + ox) * dt; cr.y += (cr.vy + oy) * dt;
++        var de = Math.min(cr.x + 80, W + 80 - cr.x, cr.y + 80, H + 80 - cr.y), sc = 1, op;
++        if (cr.type === 'bird') { var es = Math.min(1, de / 150); sc = 0.3 + es * 0.7; op = 0.6 + es * 0.2; }
++        else { op = Math.min(cr.life / 30, 1) * Math.min(1, de / 60) * 0.7; }
++        var wob = Math.sin(t * 0.6 + cr.wobblePhase) * 1.2;
++        cr.rotation = Math.atan2(cr.vy, cr.vx) * 0.15;
++        var fill = cr.color;
++        if (cr.type === 'fish' && cr.flashTime >= 0 && t - cr.flashTime < 0.8) {
++          var si = (1 - (t - cr.flashTime) / 0.8) * 0.25;
++          fill = rgbaStr(mixRgb(cr.c, [255, 255, 255], si), cr.ca);
++        }
++        ctx.save();
++        ctx.translate(cr.x, cr.y + wob);
++        ctx.rotate(cr.rotation);
++        if (cr.flipX) { ctx.scale(-1, 1); }
++        ctx.scale(sc, sc);
++        ctx.globalAlpha = op;
++        ctx.fillStyle = fill;
++        drawCreature(ctx, cr, t);
++        ctx.restore();
++      }
++      ctx.globalAlpha = 1;
++    };
++  }
++
++  /* ---------- watercolor: soft translucent washes and orbiting brush strokes that drift and breathe ---------- */
++  function styleWatercolor(env) {
++    var ctx = env.ctx, rng = env.rng, D = env.data, pal = D.pal;
++    var washes = [], scribbles = [], i, j;
++    var baseOs = [0.62, 0.52, 0.46, 0.40, 0.36];
++    var order = rng.shuffle([0, 1, 2, 3, 4]);
++    for (i = 0; i < baseOs.length; i++) {
++      var col = hexToRgb(rng.pick(pal.washes));
++      var fa = rng.rand(0.26, 0.50);
++      var op = Math.min(0.72, Math.max(0.22, baseOs[i] * rng.rand(0.88, 1.06)));
++      var w = {
++        col: col, a: fa * op,
++        cx: LW * rng.rand(0.1, 0.9), cy: LH * (order[i] + 0.5) / baseOs.length + LH * rng.rand(-0.08, 0.08),
++        rx: LW * rng.rand(0.42, 0.8), ry: LH * rng.rand(0.18, 0.36),
++        dx: rng.rand(8, 22), dy: rng.rand(8, 22), fx: rng.rand(0.02, 0.05), fy: rng.rand(0.02, 0.05),
++        px: rng.rand(0, TAU), py: rng.rand(0, TAU), pts: []
++      };
++      var n = Math.floor(rng.rand(7, 10));
++      for (j = 0; j < n; j++) {
++        w.pts.push({ a: TAU * j / n, wob: rng.rand(-0.12, 0.12), ph: rng.rand(0, TAU), sp: rng.rand(0.05, 0.14) });
++      }
++      w.fill = rgbaStr(col, 1);
++      washes.push(w);
++    }
++    var originX = LW * rng.rand(0.3, 0.7), originY = LH * rng.rand(0.35, 0.7);
++    var count = Math.floor(rng.rand(9, 15));
++    for (i = 0; i < count; i++) {
++      var pool = rng.rand(0, 1) < 0.62 ? pal.washes : pal.accents;
++      var sc = {
++        arc: rng.rand(0, 1) < 0.78, col: rgbaStr(hexToRgb(rng.pick(pool)), 1),
++        a: rng.rand(0.32, 0.56) * rng.rand(0.4, 0.75), w: rng.rand(7, 14),
++        spin: rng.rand(0.006, 0.02) * (rng.rand(0, 1) < 0.5 ? -1 : 1), ph: rng.rand(0, TAU)
++      };
++      if (sc.arc) {
++        sc.cx = originX + rng.rand(-0.45, 0.45) * LW; sc.cy = originY + rng.rand(-0.4, 0.4) * LH;
++        sc.r = rng.rand(50, 170); sc.a0 = rng.rand(0, TAU); sc.span = rng.rand(0.7, 1.9);
++      } else {
++        sc.x0 = rng.rand(30, LW - 120); sc.y0 = rng.rand(60, LH - 60);
++        var len = rng.rand(110, 240);
++        sc.x1 = sc.x0 + len * rng.rand(0.55, 0.92); sc.y1 = sc.y0 + rng.rand(-90, 90);
++        sc.c1x = sc.x0 + len * 0.33; sc.c1y = sc.y0 + rng.rand(-100, 100);
++        sc.c2x = sc.x0 + len * 0.66; sc.c2y = sc.y0 + rng.rand(-100, 100);
++      }
++      scribbles.push(sc);
++    }
++
++    /* paper grain: fixed speckle texture */
++    var grain = document.createElement('canvas');
++    grain.width = 270; grain.height = 480;
++    var gctx = grain.getContext('2d'), img = gctx.createImageData(270, 480), gd = img.data, grng = new Rng(env.seed + 77);
++    for (i = 0; i < gd.length; i += 4) {
++      var v = grng.next() < 0.5 ? 0 : 255;
++      gd[i] = v; gd[i + 1] = v; gd[i + 2] = v; gd[i + 3] = Math.floor(grng.next() * 16);
++    }
++    gctx.putImageData(img, 0, 0);
++
++    var vig = ctx.createRadialGradient(LW / 2, LH * 0.48, 0, LW / 2, LH * 0.48, Math.sqrt(LW * LW + LH * LH) * 0.5);
++    vig.addColorStop(0, 'rgba(0,0,0,0)');
++    vig.addColorStop(0.7, 'rgba(0,0,0,0)');
++    vig.addColorStop(1, 'rgba(0,0,0,0.16)');
++
++    var px = [], py = [];
++    function blob(w, t, s) {
++      var n = w.pts.length, k, cx = w.cx + Math.sin(t * w.fx + w.px) * w.dx, cy = w.cy + Math.sin(t * w.fy + w.py) * w.dy;
++      for (k = 0; k < n; k++) {
++        var p = w.pts[k], f = (1 + p.wob + 0.06 * Math.sin(t * p.sp + p.ph)) * s;
++        px[k] = cx + Math.cos(p.a) * w.rx * f;
++        py[k] = cy + Math.sin(p.a) * w.ry * f;
++      }
++      var tension = 0.92;
++      ctx.beginPath();
++      ctx.moveTo(px[0], py[0]);
++      for (k = 0; k < n; k++) {
++        var i0 = (k - 1 + n) % n, i1 = k, i2 = (k + 1) % n, i3 = (k + 2) % n;
++        ctx.bezierCurveTo(
++          px[i1] + (px[i2] - px[i0]) / 6 * tension, py[i1] + (py[i2] - py[i0]) / 6 * tension,
++          px[i2] - (px[i3] - px[i1]) / 6 * tension, py[i2] - (py[i3] - py[i1]) / 6 * tension,
++          px[i2], py[i2]);
++      }
++      ctx.closePath();
++    }
++
++    return function (t) {
++      var k, w, s;
++      ctx.fillStyle = D.paper.s;
++      ctx.fillRect(0, 0, LW, LH);
++      ctx.save();
++      ctx.translate(Math.sin(t * TAU / 24) * 9, Math.sin(t * TAU / 31 + 1) * 8);
++      for (k = 0; k < washes.length; k++) {
++        w = washes[k];
++        ctx.fillStyle = w.fill;
++        blob(w, t, 1.05);
++        ctx.globalAlpha = w.a * 0.35;
++        ctx.fill();
++        blob(w, t, 1.0);
++        ctx.globalAlpha = Math.min(0.6, w.a * 1.15);
++        ctx.fill();
++        ctx.strokeStyle = w.fill;
++        ctx.lineWidth = 4;
++        ctx.globalAlpha = Math.min(0.5, w.a * 0.6);
++        ctx.stroke();
++      }
++      ctx.restore();
++      ctx.lineCap = 'round';
++      ctx.lineJoin = 'round';
++      for (k = 0; k < scribbles.length; k++) {
++        s = scribbles[k];
++        ctx.beginPath();
++        if (s.arc) {
++          var a0 = s.a0 + t * s.spin, rr = s.r * (1 + 0.04 * Math.sin(t * 0.1 + s.ph));
++          ctx.arc(s.cx, s.cy, rr, a0, a0 + s.span, false);
++        } else {
++          var o = Math.sin(t * 0.07 + s.ph) * 12;
++          ctx.moveTo(s.x0, s.y0);
++          ctx.bezierCurveTo(s.c1x, s.c1y + o, s.c2x, s.c2y - o, s.x1, s.y1);
++        }
++        ctx.strokeStyle = s.col;
++        ctx.lineWidth = s.w * 1.9;
++        ctx.globalAlpha = s.a * 0.35;
++        ctx.stroke();
++        ctx.lineWidth = s.w;
++        ctx.globalAlpha = s.a;
++        ctx.stroke();
++      }
++      ctx.globalAlpha = 1;
++      ctx.drawImage(grain, 0, 0, LW, LH);
++      ctx.fillStyle = vig;
++      ctx.fillRect(0, 0, LW, LH);
++    };
++  }
++
++  /* ---------- blocks: Bauhaus composition of circles, squares, 2:1 bars and quarter-circle pies ---------- */
++  function styleBlocks(env) {
++    var ctx = env.ctx, rng = env.rng, P = env.pal5;
++    var bg = rgbStr(P[0]);
++    var ncol = rng.rand(0, 1) < 0.5 ? 3 : 4;
++    var colors = P.slice(1, 1 + ncol).map(rgbStr);
++    var m = rng.rand(30, 46), cols = 3, cell = (LW - 2 * m) / cols;
++    var rows = Math.floor((LH - 2 * m) / cell);
++    var ox = m, oy = (LH - rows * cell) / 2;
++    var occ = {}, shapes = [], tries = 0, target = Math.floor(rng.rand(8, 11)), lastCol = -1;
++    function free(c, r) { return c >= 0 && c < cols && r >= 0 && r < rows && !occ[c + ',' + r]; }
++    function pickCol() {
++      var ci;
++      do { ci = Math.floor(rng.rand(0, colors.length)); } while (ci === lastCol && colors.length > 1);
++      lastCol = ci;
++      return colors[ci];
++    }
++    if (rng.rand(0, 1) < 0.45) {
++      var bc = Math.floor(rng.rand(0, cols - 1)), br = Math.floor(rng.rand(0, rows - 1));
++      shapes.push({ type: rng.rand(0, 1) < 0.5 ? 'circle' : 'pie', x: ox + bc * cell, y: oy + br * cell, w: cell * 2, h: cell * 2,
++        col: pickCol(), ph: rng.rand(0, TAU), rot: Math.floor(rng.rand(0, 4)), per: rng.rand(18, 34), big: true });
++      occ[bc + ',' + br] = occ[(bc + 1) + ',' + br] = occ[bc + ',' + (br + 1)] = occ[(bc + 1) + ',' + (br + 1)] = 1;
++    }
++    while (shapes.length < target && tries < 400) {
++      tries++;
++      var c = Math.floor(rng.rand(0, cols)), r = Math.floor(rng.rand(0, rows));
++      if (!free(c, r)) { continue; }
++      var roll = rng.rand(0, 1), type, w = cell, h = cell;
++      if (roll < 0.3) { type = 'circle'; }
++      else if (roll < 0.48) { type = 'square'; }
++      else if (roll < 0.68) {
++        type = 'rect';
++        if (rng.rand(0, 1) < 0.5 && free(c + 1, r)) { w = cell * 2; occ[(c + 1) + ',' + r] = 1; }
++        else if (free(c, r + 1)) { h = cell * 2; occ[c + ',' + (r + 1)] = 1; }
++        else if (free(c + 1, r)) { w = cell * 2; occ[(c + 1) + ',' + r] = 1; }
++        else { type = 'square'; }
++      } else { type = 'pie'; }
++      occ[c + ',' + r] = 1;
++      shapes.push({ type: type, x: ox + c * cell, y: oy + r * cell, w: w, h: h, col: pickCol(), ph: rng.rand(0, TAU),
++        rot: Math.floor(rng.rand(0, 4)), per: rng.rand(16, 30), inset: rng.rand(0, 1) < 0.5 ? cell * 0.08 : 0 });
++    }
++    function smooth(x) { return x * x * (3 - 2 * x); }
++
++    return function (t) {
++      var k, s, cx, cy, hw, hh, inset;
++      ctx.fillStyle = bg;
++      ctx.fillRect(0, 0, LW, LH);
++      for (k = 0; k < shapes.length; k++) {
++        s = shapes[k];
++        inset = s.inset || 0;
++        cx = s.x + s.w / 2; cy = s.y + s.h / 2;
++        hw = s.w / 2 - inset; hh = s.h / 2 - inset;
++        ctx.fillStyle = s.col;
++        ctx.save();
++        ctx.translate(cx, cy);
++        ctx.beginPath();
++        if (s.type === 'circle') {
++          var br2 = Math.min(hw, hh) * (1 + 0.035 * Math.sin(t * 0.35 + s.ph));
++          ctx.arc(Math.sin(t * 0.13 + s.ph) * 4, Math.cos(t * 0.11 + s.ph) * 4, br2, 0, TAU);
++        } else if (s.type === 'square') {
++          ctx.rotate(Math.sin(t * 0.12 + s.ph) * 0.06);
++          ctx.rect(-hw, -hh, hw * 2, hh * 2);
++        } else if (s.type === 'rect') {
++          var slide = Math.sin(t * 0.15 + s.ph) * 6;
++          if (s.w > s.h) { ctx.rect(-hw + slide, -hh, hw * 2, hh * 2); } else { ctx.rect(-hw, -hh + slide, hw * 2, hh * 2); }
++        } else {
++          var cyc = t / s.per + s.ph, base = Math.floor(cyc), frac = cyc - base;
++          var turn = frac > 0.85 ? smooth((frac - 0.85) / 0.15) : 0;
++          ctx.rotate((s.rot + base + turn) * Math.PI / 2);
++          var span = Math.PI / 2 * (1 + 0.04 * Math.sin(t * 0.4 + s.ph));
++          ctx.moveTo(-hw, -hh);
++          ctx.arc(-hw, -hh, hw * 2, 0, span);
++          ctx.closePath();
++        }
++        ctx.fill();
++        ctx.restore();
++      }
++    };
++  }
++
++  /* ---------- sunset: gradient sky, pale sun rising and setting, thickening water stripes flowing forward ---------- */
++  function styleSunset(env) {
++    var ctx = env.ctx, rng = env.rng, P = env.pal5;
++    var all = P.slice(), idx = [0, 1, 2, 3, 4], i;
++    idx.sort(function (a, b) { return lum(all[b]) - lum(all[a]); });
++    var sun = mixRgb(all[idx[0]], [255, 250, 240], 0.35);
++    var rest = rng.shuffle(idx.slice(1));
++    var darkFirst = lum(all[rest[0]]) < lum(all[rest[1]]);
++    var skyTop = all[darkFirst ? rest[0] : rest[1]], skyBot = all[darkFirst ? rest[1] : rest[0]];
++    var waterBase = mixRgb(skyTop, [0, 0, 0], 0.15);
++    var stripeCols = [rgbStr(skyBot), rgbStr(all[rest[2]]), rgbStr(mixRgb(sun, skyBot, 0.35)), rgbStr(all[rest[3]])];
++    var horizon = LH * rng.rand(0.6, 0.64), sunR = LW * rng.rand(0.22, 0.3), sunX = LW * rng.rand(0.35, 0.65);
++    var period = rng.rand(80, 140), sunPh = rng.rand(0, TAU), nStripes = Math.floor(rng.rand(13, 18));
++    var flow = rng.rand(0.05, 0.1), expo = rng.rand(1.5, 1.9);
++    var sky = ctx.createLinearGradient(0, 0, 0, horizon);
++    sky.addColorStop(0, rgbStr(skyTop));
++    sky.addColorStop(1, rgbStr(skyBot));
++    var sunS = rgbStr(sun);
++
++    return function (t) {
++      var sunY = LH * (0.39 + 0.1 * Math.sin(t * TAU / period + sunPh));
++      ctx.fillStyle = sky;
++      ctx.fillRect(0, 0, LW, horizon + 1);
++      var glow = ctx.createRadialGradient(sunX, sunY, sunR * 0.8, sunX, sunY, sunR * 2.4);
++      glow.addColorStop(0, rgbaStr(sun, 0.3));
++      glow.addColorStop(1, rgbaStr(sun, 0));
++      ctx.fillStyle = glow;
++      ctx.fillRect(0, 0, LW, horizon);
++      ctx.beginPath();
++      ctx.arc(sunX, sunY, sunR, 0, TAU);
++      ctx.fillStyle = sunS;
++      ctx.fill();
++      ctx.fillStyle = rgbStr(waterBase);
++      ctx.fillRect(0, horizon, LW, LH - horizon);
++      var s = t * flow, base = Math.floor(s), frac = s - base, depth = LH - horizon;
++      var vis = Math.max(0, Math.min(1, (horizon - (sunY - sunR)) / (sunR * 2)));
++      for (i = -1; i < nStripes; i++) {
++        var u0 = (i + frac) / nStripes, u1 = (i + 1 + frac) / nStripes;
++        if (u1 <= 0) { continue; }
++        if (u0 < 0) { u0 = 0; }
++        var y0 = horizon + depth * Math.pow(u0, expo), y1 = horizon + depth * Math.pow(u1, expo);
++        var th = (y1 - y0) * 0.55;
++        if (th < 0.6) { th = 0.6; }
++        ctx.fillStyle = stripeCols[((i - base) % 4 + 4) % 4];
++        ctx.fillRect(0, y0, LW, th);
++        var rw = sunR * (1.3 - u0 * 0.6) * (0.75 + 0.25 * Math.sin(t * 0.7 + i * 1.7)) * vis;
++        if (rw > 1) {
++          ctx.fillStyle = sunS;
++          ctx.globalAlpha = 0.55;
++          ctx.fillRect(sunX - rw, y0 + th * 0.15, rw * 2, th * 0.7);
++          ctx.globalAlpha = 1;
++        }
++      }
++    };
++  }
++
++  /* ---------- contours: concentric slightly elliptical rings rippling outward ---------- */
++  function styleContours(env) {
++    var ctx = env.ctx, rng = env.rng, P = env.pal5;
++    var bg = rgbStr(P[0]), cols = P.slice(1).map(rgbStr);
++    var cx0 = LW * rng.rand(0.2, 0.8), cy0 = LH * rng.rand(0.2, 0.8);
++    var ratio = rng.rand(0.82, 0.96), rot0 = rng.rand(0, Math.PI);
++    var far = 0, cs = [[0, 0], [LW, 0], [0, LH], [LW, LH]], i;
++    for (i = 0; i < 4; i++) { far = Math.max(far, Math.sqrt(Math.pow(cs[i][0] - cx0, 2) + Math.pow(cs[i][1] - cy0, 2))); }
++    var N = 60, spacing = Math.max(12, far / ratio / (N - 2));
++    var flow = rng.rand(0.12, 0.25), lw = 5, wob = rng.rand(1.5, 3.5);
++
++    return function (t) {
++      var s = t * flow, base = Math.floor(s), frac = s - base;
++      var cx = cx0 + Math.sin(t * 0.05) * 10, cy = cy0 + Math.cos(t * 0.043) * 10, rot = rot0 + t * 0.01;
++      ctx.fillStyle = bg;
++      ctx.fillRect(0, 0, LW, LH);
++      ctx.lineWidth = lw;
++      for (i = 0; i < N; i++) {
++        var r = (i + frac) * spacing + Math.sin(i * 0.45 - t * 0.6) * wob;
++        if (r < 1) { continue; }
++        ctx.beginPath();
++        ctx.save();
++        ctx.translate(cx, cy);
++        ctx.rotate(rot);
++        ctx.scale(1, ratio);
++        ctx.moveTo(r, 0);
++        ctx.arc(0, 0, r, 0, TAU);
++        ctx.restore();
++        ctx.strokeStyle = cols[((i - base) % 4 + 4) % 4];
++        ctx.stroke();
++      }
++    };
++  }
++
++  /* ---------- stripes: scrolling 45 degree stripes behind a paper disc holding a dark disc ---------- */
++  function styleStripes(env) {
++    var ctx = env.ctx, rng = env.rng, P = env.pal5;
++    var bg = P[0], others = P.slice(1), i, dark = others[0];
++    for (i = 1; i < others.length; i++) {
++      if (Math.abs(lum(others[i]) - lum(bg)) > Math.abs(lum(dark) - lum(bg))) { dark = others[i]; }
++    }
++    var stripeCols = [];
++    for (i = 0; i < others.length && stripeCols.length < 3; i++) { if (others[i] !== dark) { stripeCols.push(rgbStr(others[i])); } }
++    var pitch = 45, sw = 22, dir = rng.rand(0, 1) < 0.5 ? 1 : -1, speed = rng.rand(3, 6);
++    var bigR = LW * rng.rand(0.3, 0.4), bx = LW * rng.rand(0.35, 0.65), by = LH * rng.rand(0.3, 0.7);
++    var smallR = bigR * rng.rand(0.32, 0.5), sa = rng.rand(0, TAU), so = (bigR - smallR) * rng.rand(0.2, 0.6);
++    var diag = Math.sqrt(LW * LW + LH * LH), bgS = rgbStr(bg), darkS = rgbStr(dark);
++
++    return function (t) {
++      var off = (t * speed) % (pitch * 3), k, n = Math.ceil(diag / pitch) + 4;
++      ctx.fillStyle = bgS;
++      ctx.fillRect(0, 0, LW, LH);
++      ctx.save();
++      ctx.translate(LW / 2, LH / 2);
++      ctx.rotate(dir * Math.PI / 4);
++      for (k = -n; k <= n; k++) {
++        ctx.fillStyle = stripeCols[((k % 3) + 3) % 3];
++        ctx.fillRect(k * pitch + off - sw / 2, -diag / 2, sw, diag);
++      }
++      ctx.restore();
++      var br = bigR * (1 + 0.02 * Math.sin(t * 0.3));
++      var cx = bx + Math.sin(t * 0.07) * 8, cy = by + Math.cos(t * 0.05) * 10;
++      ctx.beginPath();
++      ctx.arc(cx, cy, br, 0, TAU);
++      ctx.fillStyle = bgS;
++      ctx.fill();
++      var a = sa + t * 0.05;
++      ctx.beginPath();
++      ctx.arc(cx + Math.cos(a) * so, cy + Math.sin(a) * so, smallR * (1 + 0.04 * Math.sin(t * 0.5 + 1)), 0, TAU);
++      ctx.fillStyle = darkS;
++      ctx.fill();
++    };
++  }
++
++  /* ---------- registry ---------- */
++
++  var STYLES = [
++    { id: 'squares', name: 'Wandering Squares', make: styleSquares },
++    { id: 'pointillist', name: 'Pointillist Swirl', make: stylePointillist },
++    { id: 'pointillist2', name: 'Drifting Dots', make: stylePointillist2 },
++    { id: 'metricwave', name: 'Metric Wave', make: styleMetricwave },
++    { id: 'fabric', name: 'Breathing Fabric', make: styleFabric },
++    { id: 'cone', name: 'Light Cone', make: styleCone },
++    { id: 'surf', name: 'Surf', make: styleSurf },
++    { id: 'watercolor', name: 'Watercolor Wash', make: styleWatercolor },
++    { id: 'blocks', name: 'Bauhaus Blocks', make: styleBlocks },
++    { id: 'sunset', name: 'Striped Sunset', make: styleSunset },
++    { id: 'contours', name: 'Contour Rings', make: styleContours },
++    { id: 'stripes', name: 'Diagonal Stripes', make: styleStripes }
++  ];
++
++  window.ART_STYLES = [];
++  var byId = {}, si;
++  for (si = 0; si < STYLES.length; si++) {
++    window.ART_STYLES.push({ id: STYLES[si].id, name: STYLES[si].name });
++    byId[STYLES[si].id] = STYLES[si];
++  }
++
++  /* ---------- setup ---------- */
++
++  var seedParam = qs('seed'), styleParam = qs('style'), scaleParam = qs('scale');
++  var seed = (seedParam !== null && /^-?\d+$/.test(seedParam)) ? (parseInt(seedParam, 10) >>> 0) : Math.floor(Math.random() * 4294967296);
++  var style = byId[styleParam];
++  if (!style) {
++    // ?styles=a,b,c limits the random choice to those styles (unknown ids are ignored)
++    var pool = [], wanted = (qs('styles') || '').split(',');
++    for (var wi = 0; wi < wanted.length; wi++) { if (byId[wanted[wi]]) pool.push(byId[wanted[wi]]); }
++    if (!pool.length) pool = STYLES;
++    style = (seedParam !== null) ? pool[Math.floor(new Rng(seed ^ 0x5bd1e995).next() * pool.length)]
++      : pool[Math.floor(Math.random() * pool.length)];
++  }
++  var S = scaleParam === '1' ? 2 : 1;
++
++  var canvas = document.getElementById('art');
++  canvas.width = LW * S;
++  canvas.height = LH * S;
++  var ctx = canvas.getContext('2d');
++
++  function fit() {
++    var vw = window.innerWidth || document.documentElement.clientWidth;
++    var vh = window.innerHeight || document.documentElement.clientHeight;
++    var k = Math.max(vw / LW, vh / LH), w = Math.ceil(LW * k), h = Math.ceil(LH * k);
++    canvas.style.width = w + 'px';
++    canvas.style.height = h + 'px';
++    canvas.style.left = Math.floor((vw - w) / 2) + 'px';
++    canvas.style.top = Math.floor((vh - h) / 2) + 'px';
++  }
++  fit();
++  window.addEventListener('resize', fit, false);
++
++  var env = {
++    ctx: ctx, seed: seed,
++    rng: new Rng(seed),
++    data: makeInkData(new Rng(seed + 1)),
++    pal5: makePal5(new Rng(seed + 2))
++  };
++  var draw = style.make(env);
++
++  window.ART_CURRENT = { id: style.id, name: style.name, seed: seed };
++  window.ART_STATS = { frames: 0, totalMs: 0, maxMs: 0 };
++
++  var raf = window.requestAnimationFrame || window.webkitRequestAnimationFrame ||
++    function (cb) { return window.setTimeout(function () { cb(now()); }, 33); };
++
++  var startT = null, lastT = 0, FRAME_MS = 1000 / 30 - 2;
++
++  function tick() {
++    raf(tick);
++    var tnow = now();
++    if (startT === null) { startT = tnow; lastT = tnow - 1000 / 30; }
++    if (tnow - lastT < FRAME_MS) { return; }
++    var dt = Math.min(3, (tnow - lastT) / (1000 / 60));
++    lastT = tnow;
++    var t0 = now();
++    ctx.setTransform(S, 0, 0, S, 0, 0);
++    ctx.globalAlpha = 1;
++    draw((tnow - startT) / 1000, dt);
++    var ms = now() - t0;
++    window.ART_STATS.frames++;
++    window.ART_STATS.totalMs += ms;
++    if (ms > window.ART_STATS.maxMs) { window.ART_STATS.maxMs = ms; }
++  }
++  tick();
++})();
++</script>
++</body>
++</html>
 diff --git a/app/src/main/resources/web/icon.png b/app/src/main/resources/web/icon.png
 new file mode 100644
 index 0000000000000000000000000000000000000000..ea91745b542328f2c151680075ea136db7df0d07
@@ -817,10 +2445,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..a536721
+index 0000000..c2fd629
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1222 @@
+@@ -0,0 +1,1352 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -980,6 +2608,19 @@ index 0000000..a536721
 +.extras code{font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 5px;word-break:break-all}
 +.extras a{color:var(--ink)}
 +.extras .who{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--muted);margin-bottom:10px}
++.srcrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0}
++.srcrow + .srcrow{border-top:1px solid var(--line)}
++.srcrow b{font-weight:600;display:block}
++.srcrow small{color:var(--muted);font-size:13px}
++.tile.off img{opacity:.35;filter:grayscale(1)}
++.tile .badge.offb{left:auto;right:4px;top:auto;bottom:4px;background:var(--muted)}
++.artwrap{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
++.artprev{width:108px;aspect-ratio:9/16;border-radius:8px;overflow:hidden;background:#000;flex:none;border:1px solid var(--line)}
++.artprev iframe{width:540px;height:960px;border:0;transform:scale(.2);transform-origin:0 0;pointer-events:none}
++.artside{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
++.artside .btn{padding:10px}
++.artname{font-size:14px;color:var(--muted)}
++.extras .chips.styles .chip{padding:6px 11px;font-size:13px}
 +.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translate(-50%,-40px);
 +  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;
 +  transition:all .25s;z-index:20;max-width:90vw;text-align:center}
@@ -1040,6 +2681,20 @@ index 0000000..a536721
 +<div class="sectionhead"><h2>Settings</h2></div>
 +<div class="card settings" id="settings">
 +  <div class="setrow">
++    <div class="setlabel">Show on the frame</div>
++    <div class="srcrow"><span><b>Photos</b><small id="srcCountPhotos"></small></span><label class="switch"><input type="checkbox" data-src="photos"><span></span></label></div>
++    <div class="srcrow"><span><b>Generative art</b><small id="srcCountArt">Live, different every time</small></span><label class="switch"><input type="checkbox" data-src="art"><span></span></label></div>
++    <div class="srcrow"><span><b>NYT front page</b><small id="srcCountNyt"></small></span><label class="switch"><input type="checkbox" data-src="nyt"><span></span></label></div>
++    <div class="srcrow"><span><b>Spotify</b><small id="srcCountSpotify"></small></span><label class="switch"><input type="checkbox" data-src="spotify"><span></span></label></div>
++    <div id="artOftenRow" hidden style="padding-top:6px">
++      <div class="chips" id="artOften">
++        <button class="chip" data-c="1">Art now and then</button>
++        <button class="chip" data-c="3">Art often</button>
++        <button class="chip" data-c="6">Mostly art</button>
++      </div>
++    </div>
++  </div>
++  <div class="setrow">
 +    <div class="setlabel">Change picture every</div>
 +    <div class="chips" id="intervalChips"></div>
 +  </div>
@@ -1076,6 +2731,22 @@ index 0000000..a536721
 +  <button class="primary" id="nytGo">Put today’s front page on the frame</button>
 +  <div class="progress" id="nytStatus"></div>
 +  <div class="autorow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="nytAuto"><span></span></label></div>
++</div>
++
++<div class="card extras" id="artCard">
++  <h3>Generative art</h3>
++  <p>Animated pieces drawn live on the frame. Each time one comes up it picks a new style and seed.</p>
++  <div class="artwrap">
++    <div class="artprev"><iframe id="artFrame" title="Generative art preview" scrolling="no"></iframe></div>
++    <div class="artside">
++      <div class="artname" id="artName">Loading…</div>
++      <button class="btn" id="artShuffle">Shuffle</button>
++      <button class="btn" id="artKeep">Keep this one</button>
++    </div>
++  </div>
++  <div class="setlabel" style="font-size:14px">Styles on the frame <small id="artStylesNote">all</small></div>
++  <div class="chips styles" id="artStyles"></div>
++  <div class="autorow"><span>Include art in the rotation</span><label class="switch"><input type="checkbox" id="artOn"><span></span></label></div>
 +</div>
 +
 +<div class="card extras" id="spCard">
@@ -1270,6 +2941,7 @@ index 0000000..a536721
 +    var n = files.length;
 +    $("count").textContent = n ? "· " + n : "";
 +    $("btnSelect").hidden = n === 0;
++    if (typeof renderSources === "function" && sources) setTimeout(renderSources, 0);
 +    if (n === 0 && selecting) setSelecting(false);
 +    $("empty").hidden = n > 0 || pending.length > 0;
 +  }
@@ -2035,11 +3707,163 @@ index 0000000..a536721
 +  }
 +  spRender(); spHandleReturn(); if (spTokens()) spWhoAmI(); spFollowLoop();
 +
++  // ---------- what's on the frame ----------
++  var sources = {photos: true, art: false, nyt: true, spotify: true, artCount: 1, artStyles: ""};
++  function kindOf(n){ n = (n || "").toLowerCase(); return n.indexOf("nyt-frontpage-") === 0 ? "nyt" : n.indexOf("spotify-") === 0 ? "spotify" : n.indexOf("art-") === 0 ? "art" : "photos"; }
++  function renderSources(){
++    Array.prototype.forEach.call(document.querySelectorAll("[data-src]"), function(el){ el.checked = !!sources[el.dataset.src]; });
++    $("artOn").checked = !!sources.art;
++    $("artOftenRow").hidden = !sources.art;
++    Array.prototype.forEach.call(document.querySelectorAll("#artOften .chip"), function(b){ b.classList.toggle("sel", +b.dataset.c === sources.artCount); });
++    var c = {photos: 0, nyt: 0, spotify: 0, art: 0}; files.forEach(function(f){ c[kindOf(f.name)]++; });
++    $("srcCountPhotos").textContent = c.photos + (c.photos === 1 ? " photo" : " photos") + (sources.photos ? "" : " · paused");
++    $("srcCountArt").textContent = "Live, different every time" + (c.art ? " · " + c.art + " kept" : "");
++    $("srcCountNyt").textContent = c.nyt ? (sources.nyt ? "On the frame" : "Paused") : "Add it from Extras";
++    $("srcCountSpotify").textContent = c.spotify ? c.spotify + (c.spotify === 1 ? " image" : " images") + (sources.spotify ? "" : " · paused") : "Add it from Extras";
++    Array.prototype.forEach.call(document.querySelectorAll(".tile[data-name]"), function(t){
++      var k = kindOf(t.dataset.name), off = !sources[k];
++      t.classList.toggle("off", off);
++      var b = t.querySelector(".offb");
++      if (off && !b) { b = document.createElement("span"); b.className = "badge offb"; b.textContent = "Off"; t.appendChild(b); }
++      if (!off && b) b.remove();
++    });
++    renderArtStyles();
++  }
++  function saveSources(patch, msg){
++    for (var k in patch) sources[k] = patch[k];
++    renderSources();
++    return saveSettings({sources: patch}, msg);
++  }
++  function loadSources(){
++    return api("/settings").then(function(j){ if (j && j.sources) { for (var k in j.sources) sources[k] = j.sources[k]; } renderSources(); }).catch(function(){ renderSources(); });
++  }
++  Array.prototype.forEach.call(document.querySelectorAll("[data-src]"), function(el){
++    el.onchange = function(){
++      var p = {}; p[el.dataset.src] = el.checked;
++      var label = {photos: "Photos", art: "Generative art", nyt: "Front page", spotify: "Spotify"}[el.dataset.src];
++      saveSources(p, label + (el.checked ? " on" : " off"));
++    };
++  });
++  $("artOn").onchange = function(){ saveSources({art: this.checked}, "Generative art " + (this.checked ? "on" : "off")); };
++  Array.prototype.forEach.call(document.querySelectorAll("#artOften .chip"), function(b){
++    b.onclick = function(){ saveSources({artCount: +b.dataset.c}, b.textContent); };
++  });
++
++  // ---------- extras: generative art ----------
++  var artStyleList = [], artSeed = 0, artStyle = "";
++  function artLoad(){
++    artSeed = Math.floor(Math.random() * 1e9);
++    var pick = (sources.artStyles || "").split(",").filter(Boolean);
++    artStyle = pick.length ? pick[Math.floor(Math.random() * pick.length)] : "";
++    $("artFrame").src = "/art/?seed=" + artSeed + (artStyle ? "&style=" + artStyle : "") + "&preview=1";
++  }
++  $("artFrame").addEventListener("load", function(){
++    try {
++      var w = $("artFrame").contentWindow;
++      if (w.ART_STYLES && !artStyleList.length) { artStyleList = w.ART_STYLES; renderArtStyles(); }
++      var id = (w.ART_CURRENT && w.ART_CURRENT.id) || artStyle, hit = artStyleList.filter(function(s){ return s.id === id; })[0];
++      $("artName").textContent = hit ? hit.name : "Generative art";
++    } catch (e) { $("artName").textContent = "Generative art"; }
++  });
++  function renderArtStyles(){
++    var box = $("artStyles"); if (!artStyleList.length) return;
++    var chosen = (sources.artStyles || "").split(",").filter(Boolean);
++    box.innerHTML = "";
++    artStyleList.forEach(function(st){
++      var b = document.createElement("button"); b.className = "chip" + (chosen.indexOf(st.id) >= 0 ? " sel" : ""); b.textContent = st.name;
++      b.onclick = function(){
++        var c = (sources.artStyles || "").split(",").filter(Boolean), i = c.indexOf(st.id);
++        if (i >= 0) c.splice(i, 1); else c.push(st.id);
++        saveSources({artStyles: c.join(",")}, c.length ? c.length + (c.length === 1 ? " style" : " styles") + " on the frame" : "All styles on the frame");
++      };
++      box.appendChild(b);
++    });
++    $("artStylesNote").textContent = chosen.length ? chosen.length + " picked" : "all (tap to pick)";
++  }
++  $("artShuffle").onclick = artLoad;
++  $("artKeep").onclick = function(){
++    var cv; try { cv = $("artFrame").contentDocument.querySelector("canvas"); } catch (e) {}
++    if (!cv) { toast("Nothing to keep yet"); return; }
++    var c = document.createElement("canvas"); c.width = W; c.height = H;
++    var cx = c.getContext("2d"), k = Math.max(W / cv.width, H / cv.height);
++    cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
++    cx.drawImage(cv, (W - cv.width * k) / 2, (H - cv.height * k) / 2, cv.width * k, cv.height * k);
++    toJpeg(c).then(function(blob){
++      return uploadBlob(blob, "art-" + ($("artName").textContent || "art").toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + artSeed.toString(36) + ".jpg");
++    }).then(function(){ toast("Kept — it’s in your rotation"); refreshFiles(); }).catch(function(){ toast("Couldn’t save it"); });
++  };
++
 +  // ---------- go ----------
-+  refreshFiles().then(refreshState).then(maybeAutoFrontPage).then(maybeAutoSpotify);
++  refreshFiles().then(refreshState).then(loadSources).then(artLoad).then(maybeAutoFrontPage).then(maybeAutoSpotify);
 +  setInterval(refreshState, 15000);
 +  document.addEventListener("visibilitychange", function(){ if (!document.hidden) { refreshFiles(); refreshState(); } });
 +})();
 +</script>
 +</body>
 +</html>
+diff --git a/app/src/test/java/com/aphex3k/eo1/WallSourcesTest.java b/app/src/test/java/com/aphex3k/eo1/WallSourcesTest.java
+new file mode 100644
+index 0000000..010de4a
+--- /dev/null
++++ b/app/src/test/java/com/aphex3k/eo1/WallSourcesTest.java
+@@ -0,0 +1,60 @@
++package com.aphex3k.eo1;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertTrue;
++
++import com.google.gson.JsonParser;
++
++import org.junit.Rule;
++import org.junit.Test;
++import org.junit.rules.TemporaryFolder;
++
++import java.io.File;
++
++public class WallSourcesTest {
++
++    @Rule
++    public TemporaryFolder tmp = new TemporaryFolder();
++
++    @Test
++    public void kindsFollowNamePrefixes() {
++        assertEquals("nyt", WallSources.kindOf("nyt-frontpage-2026-11-21-gif.gif"));
++        assertEquals("spotify", WallSources.kindOf("spotify-grid-2026-11-21-12.jpg"));
++        assertEquals("spotify", WallSources.kindOf("spotify-nowplaying-abc.jpg"));
++        assertEquals("art", WallSources.kindOf("art-striped-sunset-9q1bql.jpg"));
++        assertEquals("photos", WallSources.kindOf("IMG_9647_mwr7kuh5.jpg"));
++        assertEquals("photos", WallSources.kindOf("my-nyt-trip.jpg"));
++    }
++
++    @Test
++    public void defaultsShowEverythingButLiveArt() {
++        WallSources s = WallSources.read(tmp.getRoot());
++        assertTrue(s.allows("IMG_1.jpg"));
++        assertTrue(s.allows("nyt-frontpage-2026-11-21-clean.jpg"));
++        assertTrue(s.allows("spotify-grid-x.jpg"));
++        assertFalse(s.art);
++    }
++
++    @Test
++    public void writeReadRoundTripAndFiltering() throws Exception {
++        File dir = tmp.getRoot();
++        WallSources s = new WallSources();
++        s.apply(JsonParser.parseString("{\"photos\":false,\"art\":true,\"nyt\":false,\"artCount\":9,\"artStyles\":\"sunset,contours\"}").getAsJsonObject());
++        s.write(dir);
++        WallSources r = WallSources.read(dir);
++        assertFalse(r.allows("IMG_1.jpg"));
++        assertFalse(r.allows("nyt-frontpage-2026-11-21-clean.jpg"));
++        assertTrue(r.allows("spotify-grid-x.jpg"));
++        assertTrue(r.allows("art-blocks-1.jpg"));
++        assertEquals(6, r.artCount);                 // clamped
++        assertEquals("sunset,contours", r.artStyles);
++    }
++
++    @Test
++    public void rejectsOddStyleLists() {
++        WallSources s = new WallSources();
++        s.apply(JsonParser.parseString("{\"artStyles\":\"sunset&x=<script>\"}").getAsJsonObject());
++        assertEquals("", s.artStyles);
++    }
++}

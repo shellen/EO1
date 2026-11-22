@@ -24,6 +24,14 @@
   `crypto.subtle`); logins return via `eo2/spotify/callback.html` on GitHub Pages, or directly
   when the page is served over https (Tailscale Serve). See `../SPOTIFY-AND-TAILSCALE.md`.
 - "Whole photo" uses a scaled-down/up blur, since Safari's canvas has no `ctx.filter`.
+- **Generative art**: `/art/` serves a self-contained animated art page (12 styles, ES5 for the
+  frame's Android 4.4 WebView, rendered at 540x960 and scaled). `?style=`, `?styles=a,b`, `?seed=`.
+  Turning art on adds `web` backend entries (`art-1`…`art-N`) pointing at it, so each appearance
+  is a fresh piece.
+- **Show on the frame**: `wall-sources.json` beside `uploaded/` switches photos / art / NYT /
+  Spotify; the local backend skips switched-off kinds by file-name prefix. `GET /settings` returns
+  it; `POST /settings {"sources": {...}}` saves it and rebuilds the rotation. Unit-tested in
+  `WallSourcesTest`.
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin
   checked, like uploads). Clears the legacy quiet-hour mirror so "off" sticks.
