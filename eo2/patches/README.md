@@ -5,7 +5,7 @@
 - `/` is a new phone-first page (`app/src/main/resources/web/mobile.html`): add photos
   (resized and converted on the phone to 1080×1920 JPEG, so HEIC works; "Fill frame" or
   "Show whole photo" with blurred edges), gallery with tap-to-preview, **Show now**, **Remove**,
-  multi-select remove, Next / Screen / Brightness, and simple settings: picture interval, night
+  multi-select remove, GIF badges (GIFs upload untouched and animate on the frame), Next / Screen / Brightness, and simple settings: picture interval, night
   sleep hours, time zone.
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin

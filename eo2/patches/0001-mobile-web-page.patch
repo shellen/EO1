@@ -625,10 +625,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..8152222
+index 0000000..a7192f1
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,585 @@
+@@ -0,0 +1,587 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -691,6 +691,7 @@ index 0000000..8152222
 +.tile .badge{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;
 +  font-weight:700;padding:2px 7px;border-radius:999px}
 +.tile .badge.warn{background:var(--warn)}
++.tile .badge.gif{left:auto;right:6px;top:auto;bottom:6px}
 +.tile .vid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;font-weight:600;flex-direction:column;gap:6px}
 +.tile .vid svg{width:28px;height:28px}
 +.tile.pending{opacity:.55}
@@ -940,6 +941,7 @@ index 0000000..8152222
 +        img.src = fileUrl(f.name) + "?v=" + (f.lastModified || 0); t.appendChild(img);
 +      }
 +      if (f.warn) { var b = document.createElement("span"); b.className = "badge warn"; b.textContent = "Can’t show"; t.appendChild(b); }
++      else if (/\.gif$/i.test(f.name)) { var gb = document.createElement("span"); gb.className = "badge gif"; gb.textContent = "GIF"; t.appendChild(gb); }
 +      var ck = document.createElement("span"); ck.className = "check"; t.appendChild(ck);
 +      if (picked[f.name]) t.classList.add("picked");
 +      t.onclick = function(){
