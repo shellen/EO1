@@ -1,9 +1,22 @@
 # EO2 setup — aphex3k/EO1, no keyboard needed
 
-Files in this kit:
-- `eo1-aphex3k-2.0.1.apk` — built from github.com/aphex3k/EO1 @ 4508656 (debug-signed)
-  SHA-256 `2f8d7c64c5aed39029858aa78de1f1aa21d186f26f1882ecde70a8731bd23212`
-- `configuration.json` — uploads-only config: 5-minute interval, screen off 00:00–06:59 Pacific
+## Easiest: run the script (Mac)
+
+1. Make a folder, e.g. `~/EO2`, and put two files in it:
+   - `setup-eo2.sh` (from this folder of the repo)
+   - the APK, `eo1-aphex3k-2.0.1.apk` (built from github.com/aphex3k/EO1 @ 4508656, debug-signed;
+     SHA-256 `2f8d7c64c5aed39029858aa78de1f1aa21d186f26f1882ecde70a8731bd23212`)
+2. Open Terminal and run:
+
+       cd ~/EO2
+       bash setup-eo2.sh
+
+It installs adb (via Homebrew) if needed, finds the frame on your Wi-Fi, removes the other
+home-screen apps, asks for your time zone / interval / night hours, installs, reboots, and opens
+the upload page. It asks before every change and is safe to re-run.
+
+The manual steps below are what the script does, in case you want to do them by hand.
+`configuration.json` in this folder is an example settings file (the script writes its own).
 
 The EO2 ships with ADB (Android's debug tool) listening on Wi-Fi port 5555, with root, from boot.
 So everything below is done from your computer over Wi-Fi. No OTG, keyboard or mouse needed.
