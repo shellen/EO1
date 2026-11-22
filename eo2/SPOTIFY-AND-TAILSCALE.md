@@ -5,7 +5,7 @@
 Connect once on the phone page and the frame takes over the connection: it checks what's playing
 every few seconds on its own, so it stays current with no phone around.
 
-- **Live on the frame**: an animated now-playing page in **Kinetic Type** or **Liquid Light**,
+- **Live on the frame**: an animated now-playing page in **Kinetic Type**, **Liquid Light** or **Album Wall**,
   leading with the artist, the song or the date. Turn on **Take over the frame while music plays**
   and it holds the screen while something is playing, then returns to your rotation. When nothing
   is playing it shows what you last played.

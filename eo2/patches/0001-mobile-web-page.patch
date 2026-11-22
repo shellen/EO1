@@ -4773,10 +4773,10 @@ index 0000000..4aa2ad2
 +</html>
 diff --git a/app/src/main/resources/web/music.html b/app/src/main/resources/web/music.html
 new file mode 100644
-index 0000000..4e27014
+index 0000000..5ea0678
 --- /dev/null
 +++ b/app/src/main/resources/web/music.html
-@@ -0,0 +1,1175 @@
+@@ -0,0 +1,1510 @@
 +<!DOCTYPE html>
 +<html>
 +<head>
@@ -4804,7 +4804,8 @@ index 0000000..4e27014
 +
 +  window.MUSIC_STYLES = [
 +    { id: 'kinetic', name: 'Kinetic Type' },
-+    { id: 'liquid', name: 'Liquid Light' }
++    { id: 'liquid', name: 'Liquid Light' },
++    { id: 'wall', name: 'Album Wall' }
 +  ];
 +
 +  function qs(name) {
@@ -4813,7 +4814,7 @@ index 0000000..4e27014
 +  }
 +
 +  var styleId = qs('style');
-+  if (styleId !== 'liquid') { styleId = 'kinetic'; }
++  if (styleId !== 'liquid' && styleId !== 'wall') { styleId = 'kinetic'; }
 +  var lead = qs('lead');
 +  if (lead !== 'track' && lead !== 'date') { lead = 'artist'; }
 +  var preview = qs('preview') === '1';
@@ -5254,18 +5255,32 @@ index 0000000..4e27014
 +
 +  var MAXR = preview ? 8 : 24;
 +  var recent = [], recentSig = '', recentVer = 0;
++  /* Cover images for recent albums are only loaded by the wall style (bounded by MAXR). */
++  var wantRecentArt = styleId === 'wall';
 +  function setRecent(list) {
 +    list = (list || []).slice(0, MAXR);
 +    var sig = '', i;
-+    for (i = 0; i < list.length; i++) { sig += (list[i].album || '') + '|' + (list[i].artist || '') + ';'; }
++    for (i = 0; i < list.length; i++) { sig += (list[i].album || '') + '|' + (list[i].artist || '') + '|' + (wantRecentArt ? list[i].art || '' : '') + ';'; }
 +    if (sig === recentSig) { return; }
 +    recentSig = sig;
-+    recent = [];
-+    for (i = 0; i < list.length; i++) { recent.push({ album: list[i].album || '', artist: list[i].artist || '' }); }
-+    recentVer++;
 +    var keep = {};
 +    if (curScene && curScene.artUrl) { keep[curScene.artUrl] = true; }
 +    if (pendingSpec && pendingSpec.artUrl) { keep[pendingSpec.artUrl] = true; }
++    recent = [];
++    for (i = 0; i < list.length; i++) {
++      (function (r) {
++        var it = { album: r.album || '', artist: r.artist || '', art: r.art || '', img: null, ready: !wantRecentArt };
++        recent.push(it);
++        if (!wantRecentArt) { return; }
++        if (it.art) { keep[it.art] = true; }
++        loadArt(it.art, function (img) {
++          it.img = img || fallbackArt(it.artist + '|' + it.album);
++          it.ready = true;
++          recentVer++;
++        });
++      })(list[i]);
++    }
++    recentVer++;
 +    pruneCache(keep);
 +  }
 +
@@ -5334,13 +5349,15 @@ index 0000000..4e27014
 +    ['Low Tide', 'The Lanterns'], ['Neon Orchard', 'Kito Ray'], ['Quiet Machines', 'Hollow Pine'],
 +    ['Saltwater Hymns', 'June Arden'], ['Afterglow Club', 'Velvet Static'], ['Northbound', 'Odessa Blue'],
 +    ['Small Hours', 'Pale Comet'], ['Sugar Static', 'Lumen Twins'], ['Copper Skies', 'Ana Moreau'],
-+    ['Field Recordings', 'Ostrava'], ['Cloud Atlas Drive', 'Sunday Pilots'], ['Late Bloom', 'Ivory Coastline']
++    ['Field Recordings', 'Ostrava'], ['Cloud Atlas Drive', 'Sunday Pilots'], ['Late Bloom', 'Ivory Coastline'],
++    ['Midnight Ferries', 'Teo Lind'], ['Paper Moons', 'Juniper Hale'], ['Static Bloom', 'Wren'], ['Half Light', 'Sable Days']
 +  ];
 +  var demoStart = new Date().getTime();
 +  function demoState() {
 +    var t = new Date().getTime(), i, rec = [];
 +    if (demoParam === 'idle') { return { connected: false }; }
-+    for (i = 0; i < DEMO_RECENT.length; i++) { rec.push({ album: DEMO_RECENT[i][0], artist: DEMO_RECENT[i][1], art: 'demo:r' + i }); }
++    var nrec = styleId === 'wall' ? DEMO_RECENT.length : 12;
++    for (i = 0; i < nrec; i++) { rec.push({ album: DEMO_RECENT[i][0], artist: DEMO_RECENT[i][1], art: 'demo:r' + i }); }
 +    var idx = Math.floor((t - demoStart) / 45000) % DEMO_TRACKS.length;
 +    var tr = DEMO_TRACKS[idx], cur = { title: tr.title, artist: tr.artist, album: tr.album, art: tr.art, durationMs: tr.durationMs };
 +    if (demoParam === 'long') {
@@ -5884,6 +5901,324 @@ index 0000000..4e27014
 +  }
 +
 +  /* ================================================================
++     style 3: album wall
++     ================================================================ */
++
++  function WallStyle() {
++    var CELL = 135, GAP = 4, TILE = CELL - GAP, COLS = 4, K = 10, L = CELL * K;
++    var SPD = [-15, 10, -19, 12];
++    var FLIP_DUR = 0.9;
++    var clock = 0, speed = 1, Tn = 0;
++    var tint = [8, 9, 12], tintA = 0.55;
++    var offs = [0, 300, 140, 520];
++    var wall = null, oldWall = null, wallFadeT = -99, builtVer = -1, lastBuild = -99, wallSig = '';
++    var cur = null, prev = null, tc = -99;
++    var flips = [], nextFlip = 2.5, flipCount = 0;
++    var tileCache = {}, idleTiles = null, idleShade = null;
++    var rng = new Rng(hashStr('wall' + new Date().getTime()));
++
++    function tileFor(key, img) {
++      if (!tileCache[key]) { tileCache[key] = makeCover(img, TILE); }
++      return tileCache[key];
++    }
++
++    function poolNow() {
++      var pool = [], seen = {}, i, it, key;
++      var idle = !curScene || curScene.kind !== 'track';
++      if (!idle) {
++        key = 'cur|' + (curScene.artUrl || curScene.key);
++        seen[curScene.artUrl || key] = true;
++        pool.push({ key: key, img: curScene.art });
++        for (i = 0; i < recent.length; i++) {
++          it = recent[i];
++          if (!it.ready || !it.img) { continue; }
++          key = it.art || ('fb|' + it.artist + '|' + it.album);
++          if (seen[key]) { continue; }
++          seen[key] = true;
++          pool.push({ key: key, img: it.img });
++        }
++      }
++      if (idle) {
++        if (!idleTiles) {
++          idleTiles = [];
++          for (i = 0; i < 14; i++) { idleTiles.push({ key: 'idle|' + i, img: fallbackArt('idle tile ' + i) }); }
++        }
++        pool = idleTiles.slice(0);
++      }
++      return pool;
++    }
++
++    function pickNot(n, a, b, c, start) {
++      var j, idx;
++      for (j = 0; j < n; j++) {
++        idx = (start + j) % n;
++        if (idx !== a && idx !== b && idx !== c) { return idx; }
++      }
++      return start % n;
++    }
++
++    function buildWall() {
++      var pool = poolNow(), n = pool.length, i, c, k, sig = '';
++      for (i = 0; i < n; i++) { sig += pool[i].key + ';'; }
++      builtVer = recentVer; lastBuild = Tn;
++      if (sig === wallSig && wall) { return; }
++      wallSig = sig;
++      var keepTiles = {}, tiles = [];
++      for (i = 0; i < n; i++) { tiles.push(tileFor(pool[i].key, pool[i].img)); keepTiles[pool[i].key] = true; }
++      var w = { tiles: tiles, n: n, cols: [] };
++      var order = [];
++      for (i = 0; i < n; i++) { order.push(i); }
++      for (i = n - 1; i > 0; i--) { k = Math.floor(rng.next() * (i + 1)); c = order[i]; order[i] = order[k]; order[k] = c; }
++      var pos = 0;
++      for (c = 0; c < COLS; c++) {
++        var strip = mk(CELL, L), seq = [], idx;
++        strip.x.fillStyle = '#0b0b0d';
++        strip.x.fillRect(0, 0, CELL, L);
++        for (k = 0; k < K; k++) {
++          idx = order[pos % n]; pos++;
++          if (n > 2 && (idx === seq[k - 1] || (k === K - 1 && idx === seq[0]))) {
++            idx = pickNot(n, seq[k - 1], k === K - 1 ? seq[0] : -1, -1, idx + 1);
++          } else if (n === 2 && idx === seq[k - 1]) { idx = 1 - idx; }
++          seq.push(idx);
++          strip.x.drawImage(tiles[idx], GAP / 2, k * CELL + GAP / 2, TILE, TILE);
++        }
++        w.cols.push({ strip: strip, seq: seq });
++      }
++      if (wall) { oldWall = wall; wallFadeT = Tn; }
++      wall = w;
++      flips = [];
++      var key2;
++      for (key2 in tileCache) { if (tileCache.hasOwnProperty(key2) && !keepTiles[key2]) { delete tileCache[key2]; } }
++    }
++
++    function cellY(c, k) {
++      var y = k * CELL + offs[c];
++      y = ((y % L) + L) % L;
++      if (y > H) { y -= L; }
++      return y;
++    }
++
++    function drawStrips(ctx, w) {
++      var c, o, x;
++      for (c = 0; c < COLS; c++) {
++        o = ((offs[c] % L) + L) % L;
++        x = c * CELL;
++        if (o > 0) { ctx.drawImage(w.cols[c].strip, x, o - L, CELL, L); }
++        if (o < H) { ctx.drawImage(w.cols[c].strip, x, o, CELL, L); }
++      }
++    }
++
++    function scheduleFlip() {
++      if (!wall || wall.n < 2) { return; }
++      var tries = 0, c, k, y;
++      while (tries < 12) {
++        c = Math.floor(rng.next() * COLS); k = Math.floor(rng.next() * K);
++        y = cellY(c, k);
++        var busy = false, i;
++        for (i = 0; i < flips.length; i++) { if (flips[i].c === c && Math.abs(flips[i].k - k) < 2) { busy = true; } }
++        if (!busy && y > 10 && y < H - CELL - 10) { break; }
++        tries++;
++      }
++      if (tries >= 12) { return; }
++      var seq = wall.cols[c].seq;
++      var to = pickNot(wall.n, seq[k], seq[(k + K - 1) % K], seq[(k + 1) % K], Math.floor(rng.next() * wall.n));
++      if (to === seq[k]) { return; }
++      flips.push({ c: c, k: k, from: seq[k], to: to, t0: Tn, fade: (flipCount++ % 3) === 2 });
++    }
++
++    function drawFlips(ctx) {
++      var i, f, p, x, y, s, tl;
++      for (i = flips.length - 1; i >= 0; i--) {
++        f = flips[i];
++        p = (Tn - f.t0) / FLIP_DUR;
++        x = f.c * CELL; y = cellY(f.c, f.k);
++        if (p >= 1) {
++          wall.cols[f.c].seq[f.k] = f.to;
++          wall.cols[f.c].strip.x.drawImage(wall.tiles[f.to], GAP / 2, f.k * CELL + GAP / 2, TILE, TILE);
++          flips.splice(i, 1);
++          ctx.drawImage(wall.tiles[f.to], x + GAP / 2, y + GAP / 2, TILE, TILE);
++          continue;
++        }
++        if (f.fade) {
++          ctx.globalAlpha = smooth(p);
++          ctx.drawImage(wall.tiles[f.to], x + GAP / 2, y + GAP / 2, TILE, TILE);
++          ctx.globalAlpha = 1;
++        } else {
++          ctx.fillStyle = '#0b0b0d';
++          ctx.fillRect(x, y, CELL, CELL);
++          s = Math.abs(Math.cos(Math.PI * easeInOut(p)));
++          tl = p < 0.5 ? wall.tiles[f.from] : wall.tiles[f.to];
++          ctx.drawImage(tl, x + GAP / 2 + TILE * (1 - s) / 2, y + GAP / 2, Math.max(0.5, TILE * s), TILE);
++          ctx.fillStyle = 'rgba(0,0,0,' + ((1 - s) * 0.5).toFixed(3) + ')';
++          ctx.fillRect(x + GAP / 2 + TILE * (1 - s) / 2, y + GAP / 2, Math.max(0.5, TILE * s), TILE);
++        }
++      }
++    }
++
++    function build(sc) {
++      var v = { sc: sc, idle: sc.kind !== 'track' };
++      if (v.idle) {
++        v.connect = sc.kind === 'connect' ? makeLabel(CONNECT_TEXT, '400', 14, 'rgba(235,236,240,0.7)', 0.6, 'rgba(0,0,0,0.6)') : null;
++        return v;
++      }
++      var tx = texts(sc), pal = sc.pal, ink = pal.ink, PX = 30, TW = W - PX * 2;
++      var label = makeLabel(tx.label.toUpperCase(), '700', 13, css(ink, 0.78), 2.6);
++      var date = tx.showDate ? makeLabel(tx.date.toUpperCase(), '400', 12, css(ink, 0.62), 2) : null;
++      var fh = fitWrap(tx.hero, '700', TW, 2, 80, 36);
++      if (wrap(tx.hero, '700', fh.s, TW).length > 2) { fh = fitWrap(tx.hero, '700', TW, 3, 40, 28); }
++      if (wrap(tx.hero, '700', fh.s, TW).length > 3) { fh = fitWrap(tx.hero, '700', TW, 4, 30, 20); }
++      var hero = makeText(fh.lines, '700', fh.s, css(ink), { lh: fh.s * 1.04 });
++      var f1 = fitWrap(tx.s1, '500', TW, 2, 22, 15);
++      var s1 = makeText(f1.lines, '500', f1.s, css(ink, 0.92), { lh: f1.s * 1.2 });
++      var f2 = fitWrap(tx.s2, '400', TW, 2, 16, 12);
++      var s2 = tx.s2 ? makeText(f2.lines, '400', f2.s, css(ink, 0.66), { lh: f2.s * 1.25 }) : null;
++      var bh = 30 + 16 + 18 + hero.th + 18 + s1.th + (s2 ? 8 + s2.th : 0) + 34;
++      var band = mk(W, bh), bx = band.x, y = 30;
++      bx.fillStyle = css(pal.bg); bx.fillRect(0, 0, W, bh);
++      bx.fillStyle = css(pal.accent); bx.fillRect(0, 0, W, 6);
++      blit(bx, label, PX - label.pad, y - label.pad);
++      if (date) { blit(bx, date, W - PX - date.tw - date.pad, y + 1 - date.pad); }
++      y += 16 + 18;
++      blit(bx, hero, PX - hero.pad, y - hero.pad);
++      y += hero.th + 18;
++      blit(bx, s1, PX - s1.pad, y - s1.pad);
++      y += s1.th;
++      if (s2) { y += 8; blit(bx, s2, PX - s2.pad, y - s2.pad); }
++      v.band = band; v.bh = bh; v.bandY = 916 - bh; v.pal = pal;
++      var top = 52, bottom = v.bandY - 34;
++      v.cs = Math.round(clamp(Math.min(344, bottom - top), 150, 344));
++      v.ccy = top + (bottom - top) / 2;
++      v.card = makeCover(sc.art, v.cs);
++      v.card.x.strokeStyle = 'rgba(255,255,255,0.35)';
++      v.card.x.lineWidth = 1.5;
++      v.card.x.strokeRect(0.75, 0.75, v.cs - 1.5, v.cs - 1.5);
++      var D = v.cs + 160;
++      v.shadow = mk(D, D);
++      var sx = v.shadow.x;
++      sx.shadowColor = 'rgba(0,0,0,0.75)';
++      sx.shadowBlur = 44 * S;
++      sx.shadowOffsetX = 3000 * S;
++      sx.fillStyle = '#000';
++      sx.fillRect(80 - 3000, 80, v.cs, v.cs);
++      v.target = { x: CELL * (0.5 + (hashStr(sc.key) % 4)), y: 70 + (hashStr(sc.key + 'y') % 3) * CELL };
++      return v;
++    }
++
++    function drawCard(ctx, v, cx, cy, size, a, rot) {
++      if (a <= 0.01) { return; }
++      var k = size / v.cs, h = size / 2;
++      ctx.globalAlpha = a * 0.95;
++      ctx.drawImage(v.shadow, cx - v.shadow.lw * k / 2, cy - v.shadow.lh * k / 2 + 24 * k, v.shadow.lw * k, v.shadow.lh * k);
++      ctx.globalAlpha = a;
++      ctx.save();
++      ctx.translate(cx, cy);
++      ctx.rotate(rot);
++      ctx.drawImage(v.card, -h, -h, size, size);
++      var gx = Math.sin(clock * 0.29) * h;
++      var g = ctx.createLinearGradient(-h + gx, -h, h + gx, h);
++      g.addColorStop(0, 'rgba(255,255,255,0.14)');
++      g.addColorStop(0.5, 'rgba(255,255,255,0)');
++      g.addColorStop(1, 'rgba(0,0,0,0.14)');
++      ctx.fillStyle = g;
++      ctx.fillRect(-h, -h, size, size);
++      ctx.restore();
++      ctx.globalAlpha = 1;
++    }
++
++    function drawBand(ctx, v, x0, x1) {
++      if (v.idle || x1 <= x0) { return; }
++      ctx.save();
++      ctx.beginPath(); ctx.rect(x0, v.bandY - 2, x1 - x0, v.bh + 4); ctx.clip();
++      blit(ctx, v.band, 0, v.bandY);
++      var pr = progressOf(v.sc);
++      if (pr) {
++        ctx.fillStyle = css(v.pal.ink, 0.16);
++        ctx.fillRect(30, v.bandY + v.bh - 16, W - 60, 3);
++        ctx.fillStyle = css(v.pal.accent);
++        ctx.fillRect(30, v.bandY + v.bh - 16, (W - 60) * pr.p, 3);
++      }
++      ctx.restore();
++    }
++
++    return {
++      setScene: function (sc, old) {
++        prev = cur;
++        cur = build(sc);
++        tc = Tn;
++        if (prev && prev.idle) { prev = null; }
++        builtVer = -1;
++      },
++      refresh: function () { if (cur) { cur = build(cur.sc); } },
++      frame: function (ctx, T, dt) {
++        Tn = T;
++        if (!cur) { return; }
++        var playing = !cur.idle && cur.sc.mode === 'playing';
++        speed += ((playing ? 1 : (cur.idle ? 0.45 : 0.35)) - speed) * Math.min(1, dt * 0.03);
++        clock += dt / 60 * speed;
++        var c;
++        for (c = 0; c < COLS; c++) { offs[c] += SPD[c] * speed * dt / 60; }
++        if (builtVer !== recentVer && (T - lastBuild > 1.2 || !wall)) { buildWall(); }
++        if (clock > nextFlip) { scheduleFlip(); nextFlip = clock + 0.9 + rng.next() * 1.6; }
++        /* wall */
++        drawStrips(ctx, wall);
++        if (oldWall) {
++          var wf = clamp01((T - wallFadeT) / 1.4);
++          if (wf >= 1) { oldWall = null; } else {
++            ctx.globalAlpha = 1 - smooth(wf);
++            drawStrips(ctx, oldWall);
++            ctx.globalAlpha = 1;
++          }
++        }
++        drawFlips(ctx);
++        var tt, ta;
++        if (cur.idle) { tt = [6, 8, 12]; ta = 0.6; } else {
++          tt = mix(cur.pal.bg, [0, 0, 0], 0.5); ta = playing ? 0.52 : 0.66;
++        }
++        var kk = Math.min(1, dt * 0.04);
++        tint = mix(tint, tt, kk); tintA += (ta - tintA) * kk;
++        ctx.fillStyle = css(tint, tintA);
++        ctx.fillRect(0, 0, W, H);
++        /* featured card */
++        var fy = Math.sin(clock * 0.5) * 6, rot = Math.sin(clock * 0.33) * 0.012, q, e, r;
++        if (prev) {
++          q = clamp01((T - tc) / 1.2);
++          e = easeInOut(q);
++          drawCard(ctx, prev, W / 2 + (prev.target.x - W / 2) * e, prev.ccy + fy * (1 - e) + (prev.target.y - prev.ccy) * e,
++            prev.cs + (TILE - prev.cs) * e, 1 - smooth((q - 0.55) / 0.45), rot * (1 - e));
++        }
++        if (!cur.idle) {
++          r = clamp01((T - tc - (prev ? 0.5 : 0.1)) / 1.3);
++          e = easeOutCubic(r);
++          var fx0 = CELL * 2.5, fy0 = H - CELL * 0.8;
++          drawCard(ctx, cur, fx0 + (W / 2 - fx0) * e, fy0 + (cur.ccy + fy - fy0) * e, TILE + (cur.cs - TILE) * e, smooth(r / 0.25), rot * e);
++        }
++        /* band wipe */
++        var wp = easeInOut(clamp01((T - tc - 0.25) / 0.9)), wx = W * wp;
++        if (prev) {
++          drawBand(ctx, prev, wx, W);
++          if (wp >= 1 && T - tc > 1.8) { prev = null; }
++        }
++        drawBand(ctx, cur, 0, wx);
++        if (prev && !prev.idle && !cur.idle && wp > 0 && wp < 1) {
++          var by0 = Math.min(prev.bandY, cur.bandY);
++          ctx.fillStyle = css(cur.pal.accent);
++          ctx.fillRect(wx - 6, by0, 6, 916 - by0);
++        }
++        if (cur.idle && cur.connect) {
++          if (!idleShade) {
++            idleShade = mk(W, 220);
++            var ig = idleShade.x.createLinearGradient(0, 0, 0, 220);
++            ig.addColorStop(0, 'rgba(0,0,0,0)'); ig.addColorStop(1, 'rgba(0,0,0,0.78)');
++            idleShade.x.fillStyle = ig; idleShade.x.fillRect(0, 0, W, 220);
++          }
++          blit(ctx, idleShade, 0, H - 220);
++          blit(ctx, cur.connect, (W - cur.connect.lw) / 2, H - 84);
++        }
++      }
++    };
++  }
++
++  /* ================================================================
 +     boot
 +     ================================================================ */
 +
@@ -5904,7 +6239,7 @@ index 0000000..4e27014
 +  fit();
 +  window.addEventListener('resize', fit, false);
 +
-+  style = styleId === 'liquid' ? LiquidStyle() : KineticStyle();
++  style = styleId === 'liquid' ? LiquidStyle() : (styleId === 'wall' ? WallStyle() : KineticStyle());
 +  window.MUSIC_CURRENT = { style: styleId, lead: lead };
 +  var stats = window.MUSIC_STATS = { style: styleId, frames: 0, totalMs: 0, maxMs: 0, avgMs: 0 };
 +

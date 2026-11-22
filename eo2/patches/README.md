@@ -35,7 +35,7 @@
 - **Live music**: `MusicService` keeps the frame's own Spotify connection (the phone hands over the
   refresh token via `POST /music/connect`), polls now playing every 6-15 s and recent plays every
   2 min, and serves `GET /music/state`; album art is proxied and cached (`/music/img`). `/music/`
-  is the live page (Kinetic Type, Liquid Light; `?lead=artist|track|date`), added to the rotation
+  is the live page (Kinetic Type, Liquid Light, Album Wall; `?lead=artist|track|date`), added to the rotation
   as the `music-1` web entry. With take-over on, the music page is pinned on every rotation tick
   while something plays.
 - **Storage cleanup**: `GeneratedFilesJanitor` keeps the newest file of each generated kind,

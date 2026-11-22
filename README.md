@@ -46,8 +46,9 @@ albums you've been playing. There are no accounts, no subscription and no cloud 
 - **The New York Times front page.** Today's print front page, clean, glitched, or as an
   animated glitch GIF. Your phone fetches and renders it, and it replaces yesterday's.
 - **Spotify, live.** Connect once from your phone and the frame keeps up with your music on its
-  own. Two animated now-playing styles: **Kinetic Type** (a bold typographic poster that re-flows
-  as tracks change) and **Liquid Light** (the cover's colors flowing behind it). Lead with the
+  own. Three animated now-playing styles: **Kinetic Type** (a bold typographic poster that
+  re-flows as tracks change), **Liquid Light** (the cover's colors flowing behind it) and
+  **Album Wall** (your recent covers drifting in columns behind the current album). Lead with the
   artist, the song or the date, and let it take over the frame while music plays. There's also a
   still or animated grid of the albums you've played recently.
   One-time setup: [SPOTIFY-AND-TAILSCALE.md](eo2/SPOTIFY-AND-TAILSCALE.md).
