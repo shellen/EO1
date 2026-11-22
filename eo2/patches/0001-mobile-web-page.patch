@@ -31,11 +31,187 @@ index ca8ed02..19fbb6c 100644
      public boolean raiseMinimumBrightnessStep(String via) {
          final int base = steppedBase();
          this.minimumBrightnessStep = base >= MAX_STEP ? MIN_STEP : base + 1;
+diff --git a/app/src/main/java/com/aphex3k/eo1/GeneratedFilesJanitor.java b/app/src/main/java/com/aphex3k/eo1/GeneratedFilesJanitor.java
+new file mode 100644
+index 0000000..6911fb3
+--- /dev/null
++++ b/app/src/main/java/com/aphex3k/eo1/GeneratedFilesJanitor.java
+@@ -0,0 +1,122 @@
++package com.aphex3k.eo1;
++
++import android.util.Log;
++
++import com.aphex3k.media.local.CompatibilitySidecar;
++
++import java.io.File;
++import java.util.HashSet;
++import java.util.Set;
++
++/**
++ * Keeps the frame's storage from filling up with things the phone page generates. Safe to run at
++ * any time and as often as wanted:
++ * <ul>
++ *   <li>Of each generated kind (newspaper front page, album grid, now-playing poster) only the newest
++ *       file is kept. The phone page already replaces them; this catches interrupted uploads.</li>
++ *   <li>Compatibility notes and gallery thumbnails whose file is gone are removed.</li>
++ *   <li>Upload temp folders older than an hour are removed.</li>
++ *   <li>The album-art cache is kept to its newest few dozen images.</li>
++ * </ul>
++ * Photos and kept art stills are never touched: those are the user's choices.
++ */
++public final class GeneratedFilesJanitor {
++
++    private static final String TAG = "EO1-janitor";
++    static final String[] SINGLE_KINDS = {"nyt-frontpage-", "spotify-grid-", "spotify-nowplaying-"};
++    private static final long STALE_TEMP_MS = 3600000L;
++
++    private GeneratedFilesJanitor() {
++    }
++
++    /** @return how many files were removed */
++    public static synchronized int run(File filesDir) {
++        int removed = 0;
++        File up = new File(filesDir, UploadedMedia.DIR_NAME);
++        File[] files = up.listFiles();
++        if (files != null) {
++            for (String prefix : SINGLE_KINDS) {
++                File newest = null;
++                for (File f : files) {
++                    if (isMedia(f) && f.getName().startsWith(prefix)
++                            && (newest == null || f.lastModified() > newest.lastModified())) {
++                        newest = f;
++                    }
++                }
++                for (File f : files) {
++                    if (isMedia(f) && f.getName().startsWith(prefix) && f != newest) {
++                        removed += delete(f);
++                        removed += delete(CompatibilitySidecar.sidecarFor(f));
++                    }
++                }
++            }
++            long now = System.currentTimeMillis();
++            files = up.listFiles();
++            Set<String> names = new HashSet<>();
++            for (File f : files == null ? new File[0] : files) {
++                if (f.isFile()) {
++                    names.add(f.getName());
++                }
++            }
++            for (File f : files == null ? new File[0] : files) {
++                String n = f.getName();
++                if (f.isFile() && n.endsWith(CompatibilitySidecar.SUFFIX)
++                        && !names.contains(n.substring(0, n.length() - CompatibilitySidecar.SUFFIX.length()))) {
++                    removed += delete(f);
++                } else if (f.isDirectory() && n.startsWith("incoming_") && now - f.lastModified() > STALE_TEMP_MS) {
++                    removed += deleteTree(f);
++                }
++            }
++            // thumbnails of files that no longer exist
++            File[] thumbs = new File(filesDir, "thumbs").listFiles();
++            if (thumbs != null) {
++                Set<String> keys = new HashSet<>();
++                for (String n : names) {
++                    keys.add(WebServer.thumbKey(n) + "_");
++                }
++                for (File t : thumbs) {
++                    String tn = t.getName();
++                    int us = tn.indexOf('_', tn.indexOf('_') + 1);
++                    String key = us > 0 ? tn.substring(0, us + 1) : tn;
++                    if (!keys.contains(key)) {
++                        removed += delete(t);
++                    }
++                }
++            }
++        }
++        File cache = new File(filesDir, "music-cache");
++        if (cache.isDirectory()) {
++            int before = count(cache);
++            MusicService.trimCache(cache);
++            removed += Math.max(0, before - count(cache));
++        }
++        if (removed > 0) {
++            Log.i(TAG, "removed " + removed + " generated/orphaned file(s)");
++        }
++        return removed;
++    }
++
++    private static boolean isMedia(File f) {
++        return f.isFile() && !f.getName().endsWith(CompatibilitySidecar.SUFFIX);
++    }
++
++    private static int count(File dir) {
++        String[] l = dir.list();
++        return l == null ? 0 : l.length;
++    }
++
++    private static int delete(File f) {
++        return f.exists() && f.delete() ? 1 : 0;
++    }
++
++    private static int deleteTree(File d) {
++        int n = 0;
++        File[] kids = d.listFiles();
++        if (kids != null) {
++            for (File k : kids) {
++                n += k.isDirectory() ? deleteTree(k) : delete(k);
++            }
++        }
++        return n + delete(d);
++    }
++}
 diff --git a/app/src/main/java/com/aphex3k/eo1/MainActivity.java b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
-index b12c5a6..8f23384 100644
+index b12c5a6..39ea9be 100644
 --- a/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 +++ b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
-@@ -6249,10 +6249,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -846,6 +846,7 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+         }
+         this.webServer = new WebServer(this);
+         this.webServer.start();
++        startMusicAndJanitor();
+ 
+         // The configuration was loaded above, before UpdateManager.acquire() — and so, incidentally,
+         // before the web server started below, which is the ordering this comment always claimed.
+@@ -1928,6 +1929,39 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+         }
+     }
+ 
++    /**
++     * Starts the frame's own Spotify poller (if connected) and tidies generated files. When playback
++     * starts or stops and the music takeover is on, move to or away from the music page right away
++     * instead of waiting for the next tick.
++     */
++    private void startMusicAndJanitor() {
++        final java.io.File files = getFilesDir();
++        new Thread(new Runnable() {
++            @Override
++            public void run() {
++                try {
++                    GeneratedFilesJanitor.run(files);
++                } catch (Throwable t) {
++                    Log.w(TAG, "janitor at start failed: " + t);
++                }
++            }
++        }, "janitor").start();
++        MusicService.get(files).setListener(new MusicService.Listener() {
++            @Override
++            public void onPlaybackChanged(boolean nowPlaying) {
++                WallSources s = WallSources.read(files);
++                if (s.music && s.musicTakeover) {
++                    runOnUiThread(new Runnable() {
++                        @Override
++                        public void run() {
++                            showNextImage();
++                        }
++                    });
++                }
++            }
++        });
++    }
++
+     @Override
+     public void showNextImage() {
+         if (this.brightnessManager.getShouldTheScreenBeOn()) {
+@@ -6249,10 +6283,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
                  // Debug-only: "the clip that misbehaves is #600 of 1000", which ?action=next cannot
                  // promise to reach. Checked and parked from this thread, which may read the pool's
                  // key set but never its records; the rotation worker picks the record up.
@@ -51,7 +227,7 @@ index b12c5a6..8f23384 100644
                  if (!mediaManager.queueAssetDisplay(assetKey)) {
                      return false;
                  }
-@@ -6270,9 +6273,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -6270,9 +6307,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
              case "screen":
                  task = this::toggleScreenOn;
                  break;
@@ -79,12 +255,657 @@ index b12c5a6..8f23384 100644
              case "config":
                  task = this::showConfigurationUI;
                  break;
+diff --git a/app/src/main/java/com/aphex3k/eo1/MediaManager.java b/app/src/main/java/com/aphex3k/eo1/MediaManager.java
+index 110240e..d16c2d5 100644
+--- a/app/src/main/java/com/aphex3k/eo1/MediaManager.java
++++ b/app/src/main/java/com/aphex3k/eo1/MediaManager.java
+@@ -293,6 +293,20 @@ public class MediaManager implements MediaManagerInterface, ApiServiceGenerator.
+ 
+     @Override
+     public void showNextImage(Activity activity) {
++        // While music plays and the phone page asked for it, the live music page holds the screen:
++        // it is pinned for every tick (never skipped, so the watchdog still sees the rotation move).
++        try {
++            if (MusicService.takeoverActive(activity.getFilesDir())) {
++                for (String key : poolKeys) {
++                    if (key.startsWith(WallSources.MUSIC_ID + ":")) {
++                        pinnedAssetKey.set(key);
++                        break;
++                    }
++                }
++            }
++        } catch (Throwable t) {
++            Log.w(TAG, "music takeover check failed: " + t);
++        }
+         startRotation(activity, false);
+     }
+ 
+diff --git a/app/src/main/java/com/aphex3k/eo1/MusicService.java b/app/src/main/java/com/aphex3k/eo1/MusicService.java
+new file mode 100644
+index 0000000..51d877b
+--- /dev/null
++++ b/app/src/main/java/com/aphex3k/eo1/MusicService.java
+@@ -0,0 +1,614 @@
++package com.aphex3k.eo1;
++
++import android.util.Log;
++
++import androidx.annotation.Nullable;
++
++import com.google.gson.JsonArray;
++import com.google.gson.JsonElement;
++import com.google.gson.JsonObject;
++import com.google.gson.JsonParser;
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.nio.charset.Charset;
++import java.security.MessageDigest;
++import java.text.SimpleDateFormat;
++import java.util.Arrays;
++import java.util.Comparator;
++import java.util.HashSet;
++import java.util.Locale;
++import java.util.Set;
++import java.util.TimeZone;
++import java.util.concurrent.TimeUnit;
++import java.util.regex.Pattern;
++
++import okhttp3.FormBody;
++import okhttp3.OkHttpClient;
++import okhttp3.Request;
++import okhttp3.Response;
++import okhttp3.ResponseBody;
++
++/**
++ * Keeps the frame's own Spotify connection, so the live music page stays current whether or not
++ * anyone has the phone page open. The phone page signs in once (PKCE) and hands the refresh token
++ * over; from then on this polls "currently playing" every few seconds and "recently played" every
++ * couple of minutes, and serves the result as {@code /music/state}. Album art is proxied and cached
++ * on the frame so the display page can read its pixels for colour.
++ *
++ * <p>The refresh token lives in {@code files/music.json} and is never sent back out.
++ */
++public final class MusicService {
++
++    public interface Listener {
++        /** Called on the poll thread when playback starts or stops. */
++        void onPlaybackChanged(boolean playing);
++    }
++
++    private static final String TAG = "EO1-music";
++    private static final Charset UTF_8 = Charset.forName("UTF-8");
++    private static final String FILE = "music.json";
++    private static final String CACHE_DIR = "music-cache";
++    private static final int CACHE_MAX_FILES = 60;
++    private static final long POLL_PLAYING_MS = 6000;
++    private static final long POLL_IDLE_MS = 15000;
++    private static final long RECENT_EVERY_MS = 120000;
++    private static final long JANITOR_EVERY_MS = 3600000;
++    private static final Pattern ART_URL = Pattern.compile("^https://i\\.scdn\\.co/image/[A-Za-z0-9]{8,64}$");
++
++    private static MusicService sInstance;
++
++    public static synchronized MusicService get(File filesDir) {
++        if (sInstance == null) {
++            sInstance = new MusicService(filesDir);
++        }
++        return sInstance;
++    }
++
++    private final File dir;
++    private final Object lock = new Object();
++    private String clientId;
++    private String refreshToken;
++    private String accessToken;
++    private long accessExpMs;
++    private volatile boolean playing;
++    private volatile JsonObject state = disconnectedState();
++    private JsonArray recent = new JsonArray();
++    private JsonObject last;
++    private long lastRecentMs;
++    private long lastJanitorMs;
++    private String lastError;
++    private Thread worker;
++    private volatile Listener listener;
++    private OkHttpClient http;
++
++    private MusicService(File filesDir) {
++        this.dir = filesDir;
++        load();
++        if (refreshToken != null) {
++            startWorker();
++        }
++    }
++
++    public void setListener(@Nullable Listener l) {
++        listener = l;
++    }
++
++    public boolean isConnected() {
++        synchronized (lock) {
++            return refreshToken != null;
++        }
++    }
++
++    public boolean isPlaying() {
++        return playing;
++    }
++
++    /** True when the live music page should hold the screen right now. */
++    public static boolean takeoverActive(File filesDir) {
++        WallSources s = WallSources.read(filesDir);
++        return s.music && s.musicTakeover && get(filesDir).isPlaying();
++    }
++
++    public String stateJson() {
++        return state.toString();
++    }
++
++    // ------------------------------------------------------------------ connect / disconnect
++
++    public void connect(String newClientId, String newRefreshToken, @Nullable String newAccessToken,
++            long expiresInSec) throws IOException {
++        if (newClientId == null || !newClientId.matches("[0-9a-fA-F]{32}")
++                || newRefreshToken == null || newRefreshToken.length() < 20 || newRefreshToken.length() > 1024) {
++            throw new IOException("invalid connection details");
++        }
++        synchronized (lock) {
++            clientId = newClientId;
++            refreshToken = newRefreshToken;
++            accessToken = newAccessToken;
++            accessExpMs = newAccessToken == null ? 0 : System.currentTimeMillis() + Math.max(0, expiresInSec - 60) * 1000L;
++            lastRecentMs = 0;
++            save();
++        }
++        startWorker();
++        synchronized (lock) {
++            lock.notifyAll();   // poll right away
++        }
++    }
++
++    public void disconnect() {
++        synchronized (lock) {
++            clientId = null;
++            refreshToken = null;
++            accessToken = null;
++            recent = new JsonArray();
++            last = null;
++            //noinspection ResultOfMethodCallIgnored
++            new File(dir, FILE).delete();
++            state = disconnectedState();
++            lock.notifyAll();
++        }
++        setPlaying(false);
++    }
++
++    // ------------------------------------------------------------------ polling
++
++    private synchronized void startWorker() {
++        if (worker != null && worker.isAlive()) {
++            return;
++        }
++        worker = new Thread(new Runnable() {
++            @Override
++            public void run() {
++                loop();
++            }
++        }, "music-poll");
++        worker.setDaemon(true);
++        worker.start();
++    }
++
++    private void loop() {
++        while (true) {
++            synchronized (lock) {
++                if (refreshToken == null) {
++                    worker = null;
++                    return;
++                }
++            }
++            try {
++                pollOnce();
++                lastError = null;
++            } catch (Throwable t) {
++                lastError = t.getMessage();
++                Log.w(TAG, "poll failed: " + t);
++                publish();
++            }
++            long now = System.currentTimeMillis();
++            if (now - lastJanitorMs > JANITOR_EVERY_MS) {
++                lastJanitorMs = now;
++                try {
++                    GeneratedFilesJanitor.run(dir);
++                } catch (Throwable t) {
++                    Log.w(TAG, "janitor failed: " + t);
++                }
++            }
++            synchronized (lock) {
++                try {
++                    lock.wait(playing ? POLL_PLAYING_MS : POLL_IDLE_MS);
++                } catch (InterruptedException e) {
++                    return;
++                }
++            }
++        }
++    }
++
++    private void pollOnce() throws IOException {
++        long now = System.currentTimeMillis();
++        JsonObject current = null;
++        JsonObject cp = apiGet("/me/player/currently-playing");
++        if (cp != null && cp.has("item") && !cp.get("item").isJsonNull()
++                && "track".equals(str(cp, "currently_playing_type"))
++                && cp.has("is_playing") && cp.get("is_playing").getAsBoolean()) {
++            JsonObject item = cp.getAsJsonObject("item");
++            current = trackJson(item);
++            current.addProperty("progressMs", cp.has("progress_ms") && !cp.get("progress_ms").isJsonNull() ? cp.get("progress_ms").getAsLong() : 0);
++            current.addProperty("durationMs", item.has("duration_ms") ? item.get("duration_ms").getAsLong() : 0);
++        }
++        boolean nowPlaying = current != null;
++        boolean wasPlaying = playing;
++        if (now - lastRecentMs > RECENT_EVERY_MS || (wasPlaying && !nowPlaying)) {
++            pollRecent();
++            lastRecentMs = now;
++        }
++        synchronized (lock) {
++            JsonObject s = new JsonObject();
++            s.addProperty("connected", true);
++            s.addProperty("playing", nowPlaying);
++            s.addProperty("updatedAt", now);
++            s.add("current", current);
++            s.add("last", last);
++            s.add("recent", recent);
++            state = s;
++        }
++        setPlaying(nowPlaying);
++    }
++
++    private void pollRecent() throws IOException {
++        JsonObject j = apiGet("/me/player/recently-played?limit=50");
++        if (j == null || !j.has("items")) {
++            return;
++        }
++        JsonArray items = j.getAsJsonArray("items");
++        JsonArray albums = new JsonArray();
++        Set<String> seen = new HashSet<>();
++        JsonObject newest = null;
++        for (JsonElement e : items) {
++            JsonObject it = e.getAsJsonObject();
++            if (!it.has("track") || it.get("track").isJsonNull()) {
++                continue;
++            }
++            JsonObject t = trackJson(it.getAsJsonObject("track"));
++            if (newest == null) {
++                newest = t;
++                newest.addProperty("playedAt", parseIso(str(it, "played_at")));
++            }
++            JsonObject al = it.getAsJsonObject("track").getAsJsonObject("album");
++            String alId = al == null ? null : str(al, "id");
++            if (alId == null || !seen.add(alId) || !t.has("art")) {
++                continue;
++            }
++            if (albums.size() < 24) {
++                JsonObject a = new JsonObject();
++                a.addProperty("album", str(t, "album"));
++                a.addProperty("artist", str(t, "artist"));
++                a.addProperty("art", str(t, "art"));
++                albums.add(a);
++            }
++        }
++        synchronized (lock) {
++            recent = albums;
++            if (newest != null) {
++                last = newest;
++            }
++        }
++    }
++
++    private void publish() {
++        synchronized (lock) {
++            JsonObject s = state.deepCopy();
++            s.addProperty("connected", refreshToken != null);
++            if (lastError != null) {
++                s.addProperty("error", lastError);
++            }
++            state = s;
++        }
++    }
++
++    private void setPlaying(boolean now) {
++        boolean before = playing;
++        playing = now;
++        Listener l = listener;
++        if (before != now && l != null) {
++            try {
++                l.onPlaybackChanged(now);
++            } catch (Throwable t) {
++                Log.w(TAG, "listener failed: " + t);
++            }
++        }
++    }
++
++    // ------------------------------------------------------------------ Spotify HTTP
++
++    private OkHttpClient client() {
++        if (http == null) {
++            http = ApiServiceGenerator.enableTls12OnPreLollipop(new OkHttpClient.Builder()
++                    .connectTimeout(15, TimeUnit.SECONDS)
++                    .readTimeout(20, TimeUnit.SECONDS)
++                    .writeTimeout(15, TimeUnit.SECONDS), null).build();
++        }
++        return http;
++    }
++
++    @Nullable
++    private JsonObject apiGet(String path) throws IOException {
++        for (int attempt = 0; attempt < 2; attempt++) {
++            String token = token(attempt > 0);
++            Request req = new Request.Builder().url("https://api.spotify.com/v1" + path)
++                    .header("Authorization", "Bearer " + token).build();
++            Response r = client().newCall(req).execute();
++            try {
++                if (r.code() == 204) {
++                    return null;
++                }
++                if (r.code() == 401 && attempt == 0) {
++                    continue;   // token expired early: refresh and retry once
++                }
++                if (!r.isSuccessful()) {
++                    throw new IOException("Spotify " + r.code());
++                }
++                ResponseBody b = r.body();
++                return b == null ? null : JsonParser.parseString(b.string()).getAsJsonObject();
++            } finally {
++                r.close();
++            }
++        }
++        throw new IOException("Spotify refused the token");
++    }
++
++    private String token(boolean force) throws IOException {
++        String cid;
++        String rt;
++        synchronized (lock) {
++            if (!force && accessToken != null && System.currentTimeMillis() < accessExpMs) {
++                return accessToken;
++            }
++            cid = clientId;
++            rt = refreshToken;
++        }
++        if (rt == null) {
++            throw new IOException("not connected");
++        }
++        Request req = new Request.Builder().url("https://accounts.spotify.com/api/token")
++                .post(new FormBody.Builder().add("grant_type", "refresh_token")
++                        .add("refresh_token", rt).add("client_id", cid).build()).build();
++        Response r = client().newCall(req).execute();
++        try {
++            ResponseBody b = r.body();
++            String body = b == null ? "" : b.string();
++            if (!r.isSuccessful()) {
++                if (r.code() == 400 && body.contains("invalid_grant")) {
++                    disconnect();   // revoked or replaced: the phone page will offer Connect again
++                }
++                throw new IOException("token refresh failed (" + r.code() + ")");
++            }
++            JsonObject j = JsonParser.parseString(body).getAsJsonObject();
++            synchronized (lock) {
++                accessToken = str(j, "access_token");
++                long exp = j.has("expires_in") ? j.get("expires_in").getAsLong() : 3600;
++                accessExpMs = System.currentTimeMillis() + Math.max(60, exp - 60) * 1000L;
++                String newRt = str(j, "refresh_token");
++                if (newRt != null && !newRt.equals(refreshToken)) {
++                    refreshToken = newRt;   // Spotify rotates these
++                    save();
++                }
++                return accessToken;
++            }
++        } finally {
++            r.close();
++        }
++    }
++
++    // ------------------------------------------------------------------ album art proxy
++
++    /** Cached bytes for an album-art URL, fetching it once; null for anything not Spotify art. */
++    @Nullable
++    public byte[] image(String url) {
++        if (url == null || !ART_URL.matcher(url).matches()) {
++            return null;
++        }
++        File cache = new File(dir, CACHE_DIR);
++        File f = new File(cache, sha1(url) + ".jpg");
++        if (f.isFile() && f.length() > 0) {
++            //noinspection ResultOfMethodCallIgnored
++            f.setLastModified(System.currentTimeMillis());
++            return readFile(f);
++        }
++        try {
++            Response r = client().newCall(new Request.Builder().url(url).build()).execute();
++            try {
++                ResponseBody b = r.body();
++                if (!r.isSuccessful() || b == null || b.contentLength() > 3_000_000) {
++                    return null;
++                }
++                byte[] bytes = b.bytes();
++                if (!cache.isDirectory() && !cache.mkdirs()) {
++                    return bytes;
++                }
++                File tmp = new File(cache, f.getName() + ".tmp");
++                FileOutputStream out = new FileOutputStream(tmp);
++                try {
++                    out.write(bytes);
++                } finally {
++                    out.close();
++                }
++                //noinspection ResultOfMethodCallIgnored
++                tmp.renameTo(f);
++                trimCache(cache);
++                return bytes;
++            } finally {
++                r.close();
++            }
++        } catch (IOException e) {
++            Log.w(TAG, "art fetch failed: " + e);
++            return null;
++        }
++    }
++
++    /** Keeps the art cache to its newest {@link #CACHE_MAX_FILES} files. */
++    static void trimCache(File cache) {
++        File[] files = cache.listFiles();
++        if (files == null || files.length <= CACHE_MAX_FILES) {
++            return;
++        }
++        Arrays.sort(files, new Comparator<File>() {
++            @Override
++            public int compare(File a, File b) {
++                return Long.compare(b.lastModified(), a.lastModified());
++            }
++        });
++        for (int i = CACHE_MAX_FILES; i < files.length; i++) {
++            //noinspection ResultOfMethodCallIgnored
++            files[i].delete();
++        }
++    }
++
++    // ------------------------------------------------------------------ helpers
++
++    private static JsonObject trackJson(JsonObject t) {
++        JsonObject o = new JsonObject();
++        o.addProperty("id", str(t, "id"));
++        o.addProperty("title", str(t, "name"));
++        StringBuilder artists = new StringBuilder();
++        if (t.has("artists") && t.get("artists").isJsonArray()) {
++            for (JsonElement a : t.getAsJsonArray("artists")) {
++                String n = str(a.getAsJsonObject(), "name");
++                if (n != null) {
++                    if (artists.length() > 0) {
++                        artists.append(", ");
++                    }
++                    artists.append(n);
++                }
++            }
++        }
++        o.addProperty("artist", artists.toString());
++        JsonObject al = t.has("album") && t.get("album").isJsonObject() ? t.getAsJsonObject("album") : null;
++        if (al != null) {
++            o.addProperty("album", str(al, "name"));
++            String art = biggestImage(al);
++            if (art != null) {
++                o.addProperty("art", art);
++            }
++        }
++        return o;
++    }
++
++    @Nullable
++    private static String biggestImage(JsonObject album) {
++        if (!album.has("images") || !album.get("images").isJsonArray()) {
++            return null;
++        }
++        String best = null;
++        int bestW = -1;
++        for (JsonElement e : album.getAsJsonArray("images")) {
++            JsonObject im = e.getAsJsonObject();
++            int w = im.has("width") && !im.get("width").isJsonNull() ? im.get("width").getAsInt() : 0;
++            String u = str(im, "url");
++            if (u != null && w > bestW && w <= 700) {
++                best = u;
++                bestW = w;
++            }
++        }
++        return best;
++    }
++
++    @Nullable
++    private static String str(JsonObject o, String k) {
++        return o != null && o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsString() : null;
++    }
++
++    static long parseIso(@Nullable String s) {
++        if (s == null) {
++            return 0;
++        }
++        String[] formats = {"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", "yyyy-MM-dd'T'HH:mm:ss'Z'"};
++        for (String f : formats) {
++            try {
++                SimpleDateFormat df = new SimpleDateFormat(f, Locale.US);
++                df.setTimeZone(TimeZone.getTimeZone("UTC"));
++                return df.parse(s).getTime();
++            } catch (Exception ignored) {
++                // next format
++            }
++        }
++        return 0;
++    }
++
++    private static JsonObject disconnectedState() {
++        JsonObject s = new JsonObject();
++        s.addProperty("connected", false);
++        s.addProperty("playing", false);
++        s.addProperty("updatedAt", System.currentTimeMillis());
++        s.add("current", null);
++        s.add("last", null);
++        s.add("recent", new JsonArray());
++        return s;
++    }
++
++    private void load() {
++        File f = new File(dir, FILE);
++        if (!f.isFile()) {
++            return;
++        }
++        try {
++            JsonObject j = JsonParser.parseString(new String(readFile(f), UTF_8)).getAsJsonObject();
++            clientId = str(j, "clientId");
++            refreshToken = str(j, "refreshToken");
++            if (clientId == null || refreshToken == null) {
++                clientId = null;
++                refreshToken = null;
++            } else {
++                JsonObject s = disconnectedState();
++                s.addProperty("connected", true);
++                state = s;
++            }
++        } catch (Exception e) {
++            Log.w(TAG, "music.json unreadable: " + e);
++        }
++    }
++
++    private void save() {
++        try {
++            JsonObject j = new JsonObject();
++            j.addProperty("clientId", clientId);
++            j.addProperty("refreshToken", refreshToken);
++            File tmp = new File(dir, FILE + ".tmp");
++            FileOutputStream out = new FileOutputStream(tmp);
++            try {
++                out.write(j.toString().getBytes(UTF_8));
++            } finally {
++                out.close();
++            }
++            //noinspection ResultOfMethodCallIgnored
++            tmp.setReadable(false, false);
++            //noinspection ResultOfMethodCallIgnored
++            tmp.setReadable(true, true);
++            if (!tmp.renameTo(new File(dir, FILE))) {
++                Log.w(TAG, "could not save music.json");
++            }
++        } catch (IOException e) {
++            Log.w(TAG, "could not save music.json: " + e);
++        }
++    }
++
++    private static byte[] readFile(File f) {
++        FileInputStream in = null;
++        try {
++            in = new FileInputStream(f);
++            byte[] b = new byte[(int) f.length()];
++            int off = 0;
++            while (off < b.length) {
++                int n = in.read(b, off, b.length - off);
++                if (n < 0) {
++                    break;
++                }
++                off += n;
++            }
++            return off == b.length ? b : Arrays.copyOf(b, off);
++        } catch (IOException e) {
++            return new byte[0];
++        } finally {
++            if (in != null) {
++                try {
++                    in.close();
++                } catch (IOException ignored) {
++                    // best effort
++                }
++            }
++        }
++    }
++
++    private static String sha1(String s) {
++        try {
++            byte[] d = MessageDigest.getInstance("SHA-1").digest(s.getBytes(UTF_8));
++            StringBuilder sb = new StringBuilder();
++            for (byte x : d) {
++                sb.append(String.format(Locale.US, "%02x", x));
++            }
++            return sb.toString();
++        } catch (Exception e) {
++            return Integer.toHexString(s.hashCode());
++        }
++    }
++}
 diff --git a/app/src/main/java/com/aphex3k/eo1/WallSources.java b/app/src/main/java/com/aphex3k/eo1/WallSources.java
 new file mode 100644
-index 0000000..a8a6433
+index 0000000..2293135
 --- /dev/null
 +++ b/app/src/main/java/com/aphex3k/eo1/WallSources.java
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,172 @@
 +package com.aphex3k.eo1;
 +
 +import com.google.gson.JsonObject;
@@ -106,6 +927,7 @@ index 0000000..a8a6433
 +
 +    public static final String FILE_NAME = "wall-sources.json";
 +    public static final String ART_ID_PREFIX = "art-";
++    public static final String MUSIC_ID = "music-1";
 +    private static final Charset UTF_8 = Charset.forName("UTF-8");
 +
 +    public boolean photos = true;
@@ -114,6 +936,13 @@ index 0000000..a8a6433
 +    public boolean spotify = true;
 +    /** How many art entries sit in each rotation cycle (more = art comes up more often). */
 +    public int artCount = 1;
++    /** The live music page (needs Spotify connected on the frame). */
++    public boolean music = false;
++    /** While something is playing, keep the music page on screen. */
++    public boolean musicTakeover = true;
++    public String musicStyle = "kinetic";
++    /** Hero line: artist, track or date. */
++    public String musicLead = "artist";
 +    /** Comma-separated art style ids to choose from; empty = all styles. */
 +    public String artStyles = "";
 +
@@ -197,6 +1026,20 @@ index 0000000..a8a6433
 +        if (o.has("spotify")) {
 +            spotify = o.get("spotify").getAsBoolean();
 +        }
++        if (o.has("music")) {
++            music = o.get("music").getAsBoolean();
++        }
++        if (o.has("musicTakeover")) {
++            musicTakeover = o.get("musicTakeover").getAsBoolean();
++        }
++        if (o.has("musicStyle")) {
++            String v = o.get("musicStyle").getAsString();
++            musicStyle = v.matches("[a-z]{1,20}") ? v : "kinetic";
++        }
++        if (o.has("musicLead")) {
++            String v = o.get("musicLead").getAsString();
++            musicLead = v.equals("track") || v.equals("date") ? v : "artist";
++        }
 +        if (o.has("artStyles")) {
 +            String v = o.get("artStyles").getAsString().toLowerCase(java.util.Locale.US);
 +            artStyles = v.matches("[a-z0-9,]{0,200}") ? v : "";
@@ -215,6 +1058,10 @@ index 0000000..a8a6433
 +        o.addProperty("spotify", spotify);
 +        o.addProperty("artCount", artCount);
 +        o.addProperty("artStyles", artStyles);
++        o.addProperty("music", music);
++        o.addProperty("musicTakeover", musicTakeover);
++        o.addProperty("musicStyle", musicStyle);
++        o.addProperty("musicLead", musicLead);
 +        return o;
 +    }
 +
@@ -232,10 +1079,10 @@ index 0000000..a8a6433
 +    }
 +}
 diff --git a/app/src/main/java/com/aphex3k/eo1/WebServer.java b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-index f6cbeb4..11d2d02 100644
+index f6cbeb4..e75608d 100644
 --- a/app/src/main/java/com/aphex3k/eo1/WebServer.java
 +++ b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-@@ -259,6 +259,21 @@ public class WebServer {
+@@ -259,6 +259,36 @@ public class WebServer {
          if (path.equals("/") || path.equals("/index.html")) {
              return "index";
          }
@@ -244,6 +1091,21 @@ index f6cbeb4..11d2d02 100644
 +        }
 +        if (path.equals("/icon.png")) {
 +            return "icon";
++        }
++        if (path.equals("/music") || path.equals("/music/")) {
++            return "musicPage";
++        }
++        if (path.equals("/music/state")) {
++            return "musicState";
++        }
++        if (path.equals("/music/img")) {
++            return "musicImg";
++        }
++        if (path.equals("/music/connect")) {
++            return "musicConnect";
++        }
++        if (path.equals("/music/disconnect")) {
++            return "musicDisconnect";
 +        }
 +        if (path.equals("/art") || path.equals("/art/")) {
 +            return "art";
@@ -257,7 +1119,7 @@ index f6cbeb4..11d2d02 100644
          if (path.equals("/state")) {
              return "state";
          }
-@@ -522,6 +537,15 @@ public class WebServer {
+@@ -522,6 +552,15 @@ public class WebServer {
  
          switch (routeKey) {
              case "index":
@@ -273,7 +1135,7 @@ index f6cbeb4..11d2d02 100644
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
                      return;
-@@ -529,6 +553,70 @@ public class WebServer {
+@@ -529,6 +568,131 @@ public class WebServer {
                  send(os, 200, "text/html; charset=utf-8", renderIndex());
                  break;
  
@@ -293,6 +1155,67 @@ index f6cbeb4..11d2d02 100644
 +                    streamFile(os, src, contentTypeFor(src.getName()));   // undecodable here: send the original
 +                } else {
 +                    streamFile(os, thumb, "image/jpeg");
++                }
++                break;
++            }
++
++            case "musicPage": {
++                byte[] page = classpathBytes("/web/music.html");
++                if (page == null) {
++                    send(os, 404, "text/plain", "not found");
++                    return;
++                }
++                writeHead(os, 200, "text/html; charset=utf-8", page.length);
++                os.write(page);
++                os.flush();
++                break;
++            }
++
++            case "musicState":
++                send(os, 200, "application/json", music().stateJson());
++                break;
++
++            case "musicImg": {
++                byte[] img = music().image(params.get("u"));
++                if (img == null) {
++                    send(os, 404, "text/plain", "not found");
++                    return;
++                }
++                writeHead(os, 200, "image/jpeg", img.length);
++                os.write(img);
++                os.flush();
++                break;
++            }
++
++            case "musicConnect":
++            case "musicDisconnect": {
++                if (!method.equals("POST")) {
++                    send(os, 405, "text/plain", "method not allowed");
++                    return;
++                }
++                if (!configWriteAllowed(headers, boundPort)) {
++                    sendJson(os, 403, errorJson("cross-origin request rejected"));
++                    return;
++                }
++                if (routeKey.equals("musicDisconnect")) {
++                    music().disconnect();
++                    sendJson(os, 200, okJson("disconnected"));
++                    return;
++                }
++                long declared = parseLongLenient(headers.get("content-length"));
++                if (declared < 0 || declared > 4096) {
++                    sendJson(os, 413, errorJson("body missing or too large"));
++                    return;
++                }
++                try {
++                    JsonObject req = com.google.gson.JsonParser.parseString(
++                            new String(readAll(is, declared), UTF_8)).getAsJsonObject();
++                    music().connect(req.get("clientId").getAsString(), req.get("refreshToken").getAsString(),
++                            req.has("accessToken") ? req.get("accessToken").getAsString() : null,
++                            req.has("expiresIn") ? req.get("expiresIn").getAsLong() : 0);
++                    sendJson(os, 200, okJson("connected"));
++                } catch (Exception e) {
++                    sendJson(os, 400, errorJson("could not connect: " + e.getMessage()));
 +                }
 +                break;
 +            }
@@ -344,7 +1267,7 @@ index f6cbeb4..11d2d02 100644
              case "state":
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
-@@ -591,6 +679,7 @@ public class WebServer {
+@@ -591,6 +755,7 @@ public class WebServer {
                  }
                  String name = urlDecode(decodePathSegment(path, "/delete"));
                  boolean ok = controller.deleteUploadedFile(name);
@@ -352,7 +1275,34 @@ index f6cbeb4..11d2d02 100644
                  sendJson(os, ok ? 200 : 404, ok ? okJson("deleted") : errorJson("not found"));
                  break;
              }
-@@ -1031,6 +1120,149 @@ public class WebServer {
+@@ -905,6 +1070,14 @@ public class WebServer {
+             sendJson(os, 500, errorJson("cannot create upload dir"));
+             return;
+         }
++        long incomingBytes = parseLongLenient(headers.get("content-length"));
++        if (incomingBytes > 0 && uploadDir.getUsableSpace() - incomingBytes < LOW_SPACE_RESERVE_BYTES) {
++            GeneratedFilesJanitor.run(uploadDir.getParentFile());
++            if (uploadDir.getUsableSpace() - incomingBytes < LOW_SPACE_RESERVE_BYTES) {
++                sendJson(os, 507, errorJson("The frame is nearly out of space. Remove some photos and try again."));
++                return;
++            }
++        }
+         // Unique per-request temp dir so parallel uploads cannot collide on part names or
+         // clean each other's in-progress uploads.
+         File incoming = new File(uploadDir, "incoming_" + System.nanoTime());
+@@ -941,6 +1114,11 @@ public class WebServer {
+                 }
+             }
+ 
++            try {
++                GeneratedFilesJanitor.run(uploadDir.getParentFile());
++            } catch (Throwable t) {
++                Log.w(TAG, "janitor after upload failed: " + t);
++            }
+             JsonObject o = new JsonObject();
+             o.addProperty("ok", true);
+             JsonArray arr = new JsonArray();
+@@ -1031,6 +1209,165 @@ public class WebServer {
       * {@code POST /config/import}). The body is read off the socket with a hard cap before the
       * controller touches it.
       */
@@ -464,6 +1414,22 @@ index f6cbeb4..11d2d02 100644
 +                    kept.add(b);
 +                }
 +            }
++            for (int i = 0; i < kept.size(); i++) {
++                if (WallSources.MUSIC_ID.equals(kept.get(i).getAsJsonObject().has("id")
++                        ? kept.get(i).getAsJsonObject().get("id").getAsString() : "")) {
++                    kept.remove(i);
++                    i--;
++                }
++            }
++            if (ws.music) {
++                JsonObject m = new JsonObject();
++                m.addProperty("type", "web");
++                m.addProperty("id", WallSources.MUSIC_ID);
++                m.addProperty("host", "http://127.0.0.1:" + boundPort + "/music/?style=" + ws.musicStyle
++                        + "&lead=" + ws.musicLead);
++                m.addProperty("enabled", true);
++                kept.add(m);
++            }
 +            if (ws.art) {
 +                for (int i = 1; i <= ws.artCount; i++) {
 +                    JsonObject b = new JsonObject();
@@ -502,7 +1468,7 @@ index f6cbeb4..11d2d02 100644
      private void handleConfigPost(Map<String, String> headers, InputStream is, OutputStream os)
              throws IOException {
          long declared = parseLongLenient(headers.get("content-length"));
-@@ -1208,6 +1440,129 @@ public class WebServer {
+@@ -1208,6 +1545,136 @@ public class WebServer {
  
      // --- rendering ---
  
@@ -513,7 +1479,7 @@ index f6cbeb4..11d2d02 100644
 +        return new File(parent, "thumbs");
 +    }
 +
-+    private static String thumbKey(String name) {
++    static String thumbKey(String name) {
 +        return Integer.toHexString(name.hashCode()) + "_" + Integer.toHexString(name.length());
 +    }
 +
@@ -589,6 +1555,13 @@ index f6cbeb4..11d2d02 100644
 +        }
 +    }
 +
++    /** Uploads are refused when they would leave less than this free on the frame. */
++    private static final long LOW_SPACE_RESERVE_BYTES = 150L * 1024 * 1024;
++
++    private MusicService music() {
++        return MusicService.get(controller.uploadedDir().getParentFile());
++    }
++
 +    private static volatile String sMobilePage;
 +
 +    /** The phone-first landing page, bundled as a classpath resource; null if it is missing. */
@@ -632,7 +1605,7 @@ index f6cbeb4..11d2d02 100644
      private String renderIndex() {
          File dir = controller.uploadedDir();
          UploadedMedia.FileInfo[] files = controller.listUploadedFiles();
-@@ -1232,6 +1587,7 @@ public class WebServer {
+@@ -1232,6 +1699,7 @@ public class WebServer {
              sb.append("<p><small>").append(escapeHtml(termsNotice)).append("</small></p>");
          }
          sb.append("<p>").append(escapeHtml(controller.appBuildSummary())).append("</p>");
@@ -640,7 +1613,7 @@ index f6cbeb4..11d2d02 100644
          sb.append("<p><a href=\"/state\">state</a> · <a href=\"/logs\">logs</a> · ")
                  .append("<a href=\"/crashes\">crashes</a> · ")
                  .append("<a href=\"/reports\">reports</a> · ")
-@@ -2156,6 +2512,7 @@ public class WebServer {
+@@ -2156,6 +2624,7 @@ public class WebServer {
              o.addProperty("name", f.name);
              o.addProperty("size", f.size);
              o.addProperty("lastModified", f.lastModified);
@@ -2445,10 +3418,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..c2fd629
+index 0000000..fe05873
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1352 @@
+@@ -0,0 +1,1348 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -2685,7 +3658,8 @@ index 0000000..c2fd629
 +    <div class="srcrow"><span><b>Photos</b><small id="srcCountPhotos"></small></span><label class="switch"><input type="checkbox" data-src="photos"><span></span></label></div>
 +    <div class="srcrow"><span><b>Generative art</b><small id="srcCountArt">Live, different every time</small></span><label class="switch"><input type="checkbox" data-src="art"><span></span></label></div>
 +    <div class="srcrow"><span><b>NYT front page</b><small id="srcCountNyt"></small></span><label class="switch"><input type="checkbox" data-src="nyt"><span></span></label></div>
-+    <div class="srcrow"><span><b>Spotify</b><small id="srcCountSpotify"></small></span><label class="switch"><input type="checkbox" data-src="spotify"><span></span></label></div>
++    <div class="srcrow"><span><b>Spotify stills</b><small id="srcCountSpotify"></small></span><label class="switch"><input type="checkbox" data-src="spotify"><span></span></label></div>
++    <div class="srcrow"><span><b>Live music</b><small id="srcCountMusic">Spotify, as it plays</small></span><label class="switch"><input type="checkbox" data-src="music"><span></span></label></div>
 +    <div id="artOftenRow" hidden style="padding-top:6px">
 +      <div class="chips" id="artOften">
 +        <button class="chip" data-c="1">Art now and then</button>
@@ -2762,11 +3736,31 @@ index 0000000..c2fd629
 +    <p style="margin-top:10px"><button class="linkbtn" id="spRedirectEdit">Use a different redirect address</button></p>
 +  </div>
 +  <div id="spReady" hidden>
-+    <div class="who"><span id="spWho">Connected</span><button class="linkbtn" id="spDisconnect">Disconnect</button></div>
-+    <div class="seg" role="group" aria-label="Spotify style">
++    <div class="who"><span id="spWho">Connected on the frame</span><button class="linkbtn" id="spDisconnect">Disconnect</button></div>
++
++    <div class="setlabel" style="font-size:14px;margin-top:4px">Live on the frame</div>
++    <div class="artwrap">
++      <div class="artprev"><iframe id="musicFrame" title="Live music preview" scrolling="no"></iframe></div>
++      <div class="artside">
++        <div class="seg" role="group" aria-label="Live style" id="musicStyles" style="flex-direction:column;align-items:stretch">
++          <button data-ms="kinetic">Kinetic Type</button>
++          <button data-ms="liquid">Liquid Light</button>
++        </div>
++      </div>
++    </div>
++    <div class="setlabel" style="font-size:14px">Lead with</div>
++    <div class="chips" id="musicLead">
++      <button class="chip" data-ml="artist">Artist</button>
++      <button class="chip" data-ml="track">Song</button>
++      <button class="chip" data-ml="date">Date</button>
++    </div>
++    <div class="autorow"><span>Show live music on the frame</span><label class="switch"><input type="checkbox" id="musicOn"><span></span></label></div>
++    <div class="autorow"><span>Take over the frame while music plays</span><label class="switch"><input type="checkbox" id="musicTake"><span></span></label></div>
++
++    <div class="setlabel" style="font-size:14px;margin-top:16px">Recently played still</div>
++    <div class="seg" role="group" aria-label="Still style">
 +      <button data-sp="grid">Album grid</button>
-+      <button data-sp="anim">Animated</button>
-+      <button data-sp="now">Now playing</button>
++      <button data-sp="anim">Animated grid</button>
 +    </div>
 +    <div class="chips" id="spSizes">
 +      <button class="chip" data-n="9">9 albums</button>
@@ -2776,7 +3770,6 @@ index 0000000..c2fd629
 +    <button class="primary" id="spGo">Put it on the frame</button>
 +    <div class="progress" id="spStatus"></div>
 +    <div class="autorow" id="spAutoRow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="spAuto"><span></span></label></div>
-+    <div class="autorow" id="spFollowRow" hidden><span>Follow along while this page is open</span><label class="switch"><input type="checkbox" id="spFollow"><span></span></label></div>
 +  </div>
 +</div>
 +
@@ -3477,29 +4470,48 @@ index 0000000..c2fd629
 +  }
 +  var SP_BOUNCE = "https://shellen.github.io/EO1/eo2/spotify/callback.html";
 +  var SP_SCOPES = "user-read-recently-played user-read-currently-playing";
-+  var SP_PREFIX = {grid: "spotify-grid-", anim: "spotify-grid-", now: "spotify-nowplaying-"};
++  var SP_PREFIX = "spotify-grid-";
 +  function ls(k, v){ try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch(e) { return null; } }
 +  function b64url(bytes){ var s = ""; for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
 +  function spRedirect(){ return ls("spRedirect") || (location.protocol === "https:" ? location.origin + "/" : SP_BOUNCE); }
-+  var spStyle = ls("spStyle") || "grid", spN = +(ls("spN") || 12), spBusy = false, spLastTrack = ls("spLastTrack") || "", spTimer = null;
++  var spStyle = ls("spStyle") === "anim" ? "anim" : "grid", spN = +(ls("spN") || 12), spBusy = false;
++  var music = {connected: false};   // the frame's /music/state
 +  function spSay(t){ $("spStatus").textContent = t; }
-+  function spTokens(){ try { return JSON.parse(ls("spTokens") || "null"); } catch(e) { return null; } }
++  function musicImg(u){ return "/music/img?u=" + encodeURIComponent(u); }
++  function refreshMusic(){
++    return api("/music/state").then(function(j){ music = j || {connected: false}; spRender(); return music; })
++      .catch(function(){ spRender(); return music; });
++  }
 +  function spRender(){
-+    var t = spTokens();
-+    $("spSetup").hidden = !!t; $("spReady").hidden = !t;
++    var on = !!music.connected;
++    $("spSetup").hidden = on; $("spReady").hidden = !on;
 +    $("spRedirectShow").textContent = spRedirect();
 +    $("spClient").value = $("spClient").value || ls("spClient") || "";
 +    Array.prototype.forEach.call(document.querySelectorAll("#spCard [data-sp]"), function(b){ b.classList.toggle("sel", b.dataset.sp === spStyle); });
 +    Array.prototype.forEach.call(document.querySelectorAll("#spSizes .chip"), function(b){ b.classList.toggle("sel", +b.dataset.n === spN); });
-+    $("spSizes").hidden = spStyle === "now";
-+    $("spAutoRow").hidden = spStyle === "now"; $("spFollowRow").hidden = spStyle !== "now";
-+    $("spGo").textContent = spStyle === "now" ? "Show what’s playing" : "Put it on the frame";
-+    $("spAuto").checked = ls("spAuto") === "1"; $("spFollow").checked = ls("spFollow") === "1";
++    Array.prototype.forEach.call(document.querySelectorAll("#musicStyles [data-ms]"), function(b){ b.classList.toggle("sel", b.dataset.ms === (sources.musicStyle || "kinetic")); });
++    Array.prototype.forEach.call(document.querySelectorAll("#musicLead [data-ml]"), function(b){ b.classList.toggle("sel", b.dataset.ml === (sources.musicLead || "artist")); });
++    $("musicOn").checked = !!sources.music; $("musicTake").checked = sources.musicTakeover !== false;
++    $("spAuto").checked = ls("spAuto") === "1";
++    var c = music.current, l = music.last;
++    $("spWho").textContent = c ? "Playing: " + c.title + " — " + c.artist : l ? "Last played: " + l.artist : "Connected on the frame";
 +  }
-+  Array.prototype.forEach.call(document.querySelectorAll("#spCard [data-sp]"), function(b){ b.onclick = function(){ spStyle = b.dataset.sp; ls("spStyle", spStyle); spRender(); spFollowLoop(); }; });
++  function musicPreview(){
++    var st = sources.musicStyle || "kinetic", ld = sources.musicLead || "artist";
++    var src = "/music/?style=" + st + "&lead=" + ld + "&preview=1";
++    if ($("musicFrame").getAttribute("src") !== src) $("musicFrame").setAttribute("src", src);
++  }
++  Array.prototype.forEach.call(document.querySelectorAll("#musicStyles [data-ms]"), function(b){
++    b.onclick = function(){ saveSources({musicStyle: b.dataset.ms}, b.textContent); spRender(); musicPreview(); };
++  });
++  Array.prototype.forEach.call(document.querySelectorAll("#musicLead [data-ml]"), function(b){
++    b.onclick = function(){ saveSources({musicLead: b.dataset.ml}, "Leading with " + b.textContent.toLowerCase()); spRender(); musicPreview(); };
++  });
++  $("musicOn").onchange = function(){ saveSources({music: this.checked}, "Live music " + (this.checked ? "on" : "off")); };
++  $("musicTake").onchange = function(){ saveSources({musicTakeover: this.checked}, this.checked ? "Music takes over while playing" : "Music stays in the rotation"); };
++  Array.prototype.forEach.call(document.querySelectorAll("#spCard [data-sp]"), function(b){ b.onclick = function(){ spStyle = b.dataset.sp; ls("spStyle", spStyle); spRender(); }; });
 +  Array.prototype.forEach.call(document.querySelectorAll("#spSizes .chip"), function(b){ b.onclick = function(){ spN = +b.dataset.n; ls("spN", String(spN)); spRender(); }; });
 +  $("spAuto").onchange = function(){ ls("spAuto", this.checked ? "1" : "0"); };
-+  $("spFollow").onchange = function(){ ls("spFollow", this.checked ? "1" : "0"); spFollowLoop(); };
 +  $("spCopy").onclick = function(){
 +    var t = spRedirect();
 +    (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(t) : Promise.reject()).then(function(){ toast("Copied"); }, function(){
@@ -3519,80 +4531,73 @@ index 0000000..c2fd629
 +    var verifier = b64url(rnd), nonce = b64url(rnd.subarray(0, 12));
 +    ls("spVerifier", verifier); ls("spNonce", nonce);
 +    var state = b64url(new TextEncoder().encode(JSON.stringify({f: location.origin, n: nonce})));
-+    var u = "https://accounts.spotify.com/authorize?" + new URLSearchParams({
++    location.href = "https://accounts.spotify.com/authorize?" + new URLSearchParams({
 +      client_id: id, response_type: "code", redirect_uri: spRedirect(), scope: SP_SCOPES,
 +      code_challenge_method: "S256", code_challenge: b64url(sha256(new TextEncoder().encode(verifier))), state: state
 +    }).toString();
-+    location.href = u;
 +  };
 +  $("spDisconnect").onclick = function(){
-+    askConfirm("Disconnect Spotify on this phone?", "Disconnect").then(function(y){ if (!y) return; ls("spTokens", null); spRender(); toast("Disconnected"); });
++    askConfirm("Disconnect Spotify from the frame?", "Disconnect").then(function(y){
++      if (!y) return;
++      api("/music/disconnect", {method: "POST"}).then(function(){ toast("Disconnected"); return refreshMusic(); }).catch(function(){ toast("Couldn’t reach the frame"); });
++    });
 +  };
-+  function spTokenRequest(params){
-+    return fetch("https://accounts.spotify.com/api/token", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: new URLSearchParams(params).toString()})
-+      .then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error_description || j.error || ("Spotify said " + r.status)); return j; }); })
-+      .then(function(j){
-+        var old = spTokens() || {};
-+        var t = {access: j.access_token, refresh: j.refresh_token || old.refresh, exp: Date.now() + (j.expires_in || 3600) * 1000};
-+        ls("spTokens", JSON.stringify(t)); return t;
-+      });
++  // Hand the connection to the frame: it keeps polling Spotify on its own from then on.
++  function handToFrame(t){
++    return fetch("/music/connect", {method: "POST", headers: {"Content-Type": "application/json"},
++      body: JSON.stringify({clientId: ls("spClient"), refreshToken: t.refresh_token || t.refresh, accessToken: t.access_token || t.access, expiresIn: t.expires_in || 3000})})
++      .then(function(r){ return r.json().then(function(j){ if (!r.ok || !j.ok) throw new Error(j.msg || j.error || ("frame said " + r.status)); }); })
++      .then(function(){ ls("spTokens", null); return refreshMusic(); });
 +  }
-+  // Coming back from Spotify: ?code= (https origin) or #spotify_code= (via the bounce page).
 +  function spHandleReturn(){
 +    var q = new URLSearchParams(location.search), h = new URLSearchParams(location.hash.slice(1));
 +    var code = h.get("spotify_code") || q.get("code"), state = h.get("spotify_state") || q.get("state"), err = h.get("spotify_error") || q.get("error");
-+    if (!code && !err) return;
++    if (!code && !err) {
++      var legacy = null; try { legacy = JSON.parse(ls("spTokens") || "null"); } catch(e) {}
++      if (legacy && legacy.refresh) handToFrame(legacy).then(function(){ toast("Spotify moved to the frame"); }).catch(function(){});
++      return;
++    }
 +    history.replaceState(null, "", location.pathname);
 +    if (err) { toast("Spotify: " + (err === "access_denied" ? "you cancelled" : err), 4000); return; }
 +    var st = {}; try { st = JSON.parse(atob(state.replace(/-/g, "+").replace(/_/g, "/"))); } catch(e) {}
 +    if (!st.n || st.n !== ls("spNonce")) { toast("That Spotify login didn’t start on this phone — try Connect again", 4500); return; }
 +    $("spCard").scrollIntoView({block: "center"});
 +    spSay("Finishing the Spotify connection…");
-+    spTokenRequest({grant_type: "authorization_code", code: code, redirect_uri: spRedirect(), client_id: ls("spClient"), code_verifier: ls("spVerifier")})
-+      .then(function(){ ls("spVerifier", null); ls("spNonce", null); spRender(); spSay("Connected. Pick a style and put it on the frame."); toast("Spotify connected"); spWhoAmI(); })
++    fetch("https://accounts.spotify.com/api/token", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"},
++      body: new URLSearchParams({grant_type: "authorization_code", code: code, redirect_uri: spRedirect(), client_id: ls("spClient"), code_verifier: ls("spVerifier")}).toString()})
++      .then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error_description || j.error || ("Spotify said " + r.status)); return j; }); })
++      .then(handToFrame)
++      .then(function(){ ls("spVerifier", null); ls("spNonce", null); spSay("Connected. The frame keeps up with your music on its own now."); toast("Spotify connected"); })
 +      .catch(function(e){ spSay("Couldn’t connect: " + e.message); });
 +  }
-+  function spToken(){
-+    var t = spTokens(); if (!t) return Promise.reject(new Error("Not connected"));
-+    if (t.exp - Date.now() > 60000) return Promise.resolve(t.access);
-+    return spTokenRequest({grant_type: "refresh_token", refresh_token: t.refresh, client_id: ls("spClient")}).then(function(n){ return n.access; })
-+      .catch(function(e){ ls("spTokens", null); spRender(); throw new Error("Spotify needs you to connect again (" + e.message + ")"); });
-+  }
-+  function spGet(path){
-+    return spToken().then(function(tok){ return fetch("https://api.spotify.com/v1" + path, {headers: {Authorization: "Bearer " + tok}}); }).then(function(r){
-+      if (r.status === 204) return null;
-+      if (r.status === 403) throw new Error("Spotify refused. In the developer dashboard, open your app → User Management and add your Spotify account’s email.");
-+      if (!r.ok) throw new Error("Spotify said " + r.status);
-+      return r.json();
-+    });
-+  }
-+  function spWhoAmI(){ spGet("/me").then(function(me){ if (me) $("spWho").textContent = "Connected as " + (me.display_name || me.id); }).catch(function(){}); }
-+  function bigImage(images){ return (images || []).slice().sort(function(a, b){ return (b.width || 0) - (a.width || 0); })[0]; }
 +  function spRecentAlbums(max){
-+    return spGet("/me/player/recently-played?limit=50").then(function(j){
-+      var seen = {}, out = [];
-+      ((j && j.items) || []).forEach(function(it){
-+        var al = it.track && it.track.album; if (!al || seen[al.id]) return; var img = bigImage(al.images); if (!img) return;
-+        seen[al.id] = 1; out.push({name: al.name, artist: (al.artists || []).map(function(a){ return a.name; }).join(", "), url: img.url});
-+      });
-+      if (!out.length) throw new Error("Spotify has no recent plays for this account yet");
-+      return out.slice(0, max);
++    return refreshMusic().then(function(m){
++      var r = (m.recent || []).slice();
++      if (m.current && m.current.art && !r.some(function(a){ return a.art === m.current.art; })) r.unshift({album: m.current.album, artist: m.current.artist, art: m.current.art});
++      if (!r.length) throw new Error(m.connected ? "No recent plays yet — the frame checks every couple of minutes" : "Connect Spotify first");
++      return r.slice(0, max).map(function(a){ return {name: a.album, artist: a.artist, url: musicImg(a.art)}; });
 +    });
 +  }
 +  function gridLayout(n){
 +    var cols = n === 20 ? 4 : 3, rows = Math.ceil(n / cols), cell = Math.floor(W / cols), top = Math.floor((H - rows * cell) / 2);
 +    return {cols: cols, rows: rows, cell: cell, top: top};
 +  }
++  // Header and footer follow "Lead with": the artist (now or last played), the song, or the date.
 +  function drawGridChrome(ctx, L, albums){
 +    ctx.fillStyle = "#0d0d0d"; ctx.fillRect(0, 0, W, H);
-+    var d = new Date(), pad = 60;
-+    ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "600 34px " + FONT; ctx.textBaseline = "alphabetic";
-+    ctx.fillText("RECENTLY PLAYED", pad, L.top - 110);
-+    ctx.fillStyle = "#fff"; ctx.font = "700 64px " + FONT;
-+    ctx.fillText(d.toLocaleDateString(undefined, {weekday: "long", month: "long", day: "numeric"}), pad, L.top - 40);
++    var lead = sources.musicLead || "artist", pad = 60, cur = music.current || music.last || {};
++    var dateTxt = new Date().toLocaleDateString(undefined, {weekday: "long", month: "long", day: "numeric"});
++    var label, hero, foot;
++    if (lead === "date") { label = "RECENTLY PLAYED"; hero = dateTxt; foot = albums[0].name + " — " + albums[0].artist; }
++    else if (lead === "track" && cur.title) { label = music.current ? "NOW PLAYING" : "LAST PLAYED"; hero = cur.title; foot = (cur.artist || "") + " · " + dateTxt; }
++    else { label = music.current ? "NOW PLAYING" : "RECENTLY PLAYED"; hero = cur.artist || albums[0].artist; foot = (cur.title ? cur.title + " · " : "") + dateTxt; }
++    ctx.textBaseline = "alphabetic";
++    ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "600 32px " + FONT; ctx.fillText(label, pad, L.top - 118);
++    ctx.fillStyle = "#fff"; var size = 72; ctx.font = "800 " + size + "px " + FONT;
++    while (ctx.measureText(hero).width > W - pad * 2 && size > 40) { size -= 4; ctx.font = "800 " + size + "px " + FONT; }
++    wrapText(ctx, hero, pad, L.top - 40, W - pad * 2, size, 1);
 +    var f = L.top + L.rows * L.cell;
-+    ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "600 30px " + FONT; ctx.fillText("LATEST", pad, f + 70);
-+    ctx.fillStyle = "#fff"; ctx.font = "600 40px " + FONT; wrapText(ctx, albums[0].name + " — " + albums[0].artist, pad, f + 122, W - pad * 2, 50, 2);
++    ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.font = "500 36px " + FONT; wrapText(ctx, foot, pad, f + 80, W - pad * 2, 46, 2);
 +  }
 +  function cellXY(L, i){ return [(i % L.cols) * L.cell, L.top + Math.floor(i / L.cols) * L.cell]; }
 +  function spGrid(n){
@@ -3650,65 +4655,27 @@ index 0000000..c2fd629
 +      });
 +    });
 +  }
-+  function spNowPlayingTrack(){
-+    return spGet("/me/player/currently-playing").then(function(j){
-+      if (!j || !j.item || j.currently_playing_type !== "track") return null;
-+      var tr = j.item, al = tr.album || {}, img = bigImage(al.images);
-+      return {id: tr.id, title: tr.name, artist: (tr.artists || []).map(function(a){ return a.name; }).join(", "), album: al.name, url: img && img.url, playing: j.is_playing};
-+    });
-+  }
-+  function spNowPoster(t){
-+    return loadCover(t.url).then(function(im){
-+      var c = document.createElement("canvas"); c.width = W; c.height = H; var ctx = c.getContext("2d");
-+      softBackdrop(ctx, im, im.naturalWidth, im.naturalHeight, 0.5);
-+      var size = 880, x = (W - size) / 2, y = 300;
-+      ctx.save(); ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = 60; ctx.shadowOffsetY = 24; ctx.drawImage(im, x, y, size, size); ctx.restore();
-+      var pad = 100, ty = y + size + 130;
-+      ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.font = "600 30px " + FONT; ctx.fillText("NOW PLAYING", pad, y - 50);
-+      ctx.fillStyle = "#fff"; ctx.font = "700 66px " + FONT; var lines = wrapText(ctx, t.title, pad, ty, W - pad * 2, 78, 2);
-+      ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.font = "500 44px " + FONT; wrapText(ctx, t.artist, pad, ty + lines * 78 + 20, W - pad * 2, 54, 1);
-+      ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "400 34px " + FONT; wrapText(ctx, t.album, pad, ty + lines * 78 + 84, W - pad * 2, 42, 1);
-+      return toJpeg(c);
-+    });
-+  }
 +  function spRun(quiet){
 +    if (spBusy) return Promise.resolve(); spBusy = true; $("spGo").disabled = true;
-+    var style = spStyle, n = spN, today = ymd(new Date()), job;
-+    spSay(style === "now" ? "Checking what’s playing…" : "Getting your recent plays…");
-+    if (style === "now") {
-+      job = spNowPlayingTrack().then(function(t){
-+        if (!t) { spSay("Nothing is playing on Spotify right now."); return; }
-+        var name = SP_PREFIX.now + t.id + ".jpg";
-+        if (t.id === spLastTrack && files.some(function(f){ return f.name === name; })) { spSay("Showing: " + t.title + " — " + t.artist); return; }
-+        spSay("Making the poster…");
-+        return spNowPoster(t).then(function(blob){ return replaceOnFrame(blob, name, SP_PREFIX.now, spSay, true); })
-+          .then(function(){ spLastTrack = t.id; ls("spLastTrack", t.id); spSay("Showing: " + t.title + " — " + t.artist); if (!quiet) toast("On the frame now"); });
-+      });
-+    } else {
-+      var name = SP_PREFIX.grid + today + "-" + n + (style === "anim" ? ".gif" : ".jpg");
-+      job = (style === "anim" ? spAnimated(n) : spGrid(n)).then(function(blob){
-+        return replaceOnFrame(blob, name, SP_PREFIX.grid, spSay, !quiet);
-+      }).then(function(){ ls("spLastGrid", String(Date.now())); spSay("Done — your albums are on the frame."); if (!quiet) toast("Albums added"); });
-+    }
-+    return job.catch(function(e){ spSay("Couldn’t do it: " + e.message); })
++    var n = spN, name = SP_PREFIX + ymd(new Date()) + "-" + n + (spStyle === "anim" ? ".gif" : ".jpg");
++    spSay("Getting your recent plays…");
++    return (spStyle === "anim" ? spAnimated(n) : spGrid(n)).then(function(blob){
++      return replaceOnFrame(blob, name, SP_PREFIX, spSay, !quiet);
++    }).then(function(){ ls("spLastGrid", String(Date.now())); spSay("Done — your albums are on the frame."); if (!quiet) toast("Albums added"); })
++      .catch(function(e){ spSay("Couldn’t do it: " + e.message); })
 +      .then(function(){ spBusy = false; $("spGo").disabled = false; });
 +  }
 +  $("spGo").onclick = function(){ spRun(false); };
-+  function spFollowLoop(){
-+    clearInterval(spTimer); spTimer = null;
-+    if (spStyle === "now" && ls("spFollow") === "1" && spTokens()) { spTimer = setInterval(function(){ if (!document.hidden) spRun(true); }, 30000); }
-+  }
 +  function maybeAutoSpotify(){
-+    if (!spTokens()) return;
-+    if (spStyle === "now") { if (ls("spFollow") === "1") spRun(true); return; }
-+    if (ls("spAuto") !== "1") return;
++    if (!music.connected || ls("spAuto") !== "1") return;
 +    if (Date.now() - (+(ls("spLastGrid") || 0)) < 3 * 3600 * 1000) return;   // at most every 3 hours
 +    spRun(true);
 +  }
-+  spRender(); spHandleReturn(); if (spTokens()) spWhoAmI(); spFollowLoop();
++  spHandleReturn();
++  setInterval(function(){ if (!document.hidden && music.connected) refreshMusic(); }, 20000);
 +
 +  // ---------- what's on the frame ----------
-+  var sources = {photos: true, art: false, nyt: true, spotify: true, artCount: 1, artStyles: ""};
++  var sources = {photos: true, art: false, nyt: true, spotify: true, artCount: 1, artStyles: "", music: false, musicTakeover: true, musicStyle: "kinetic", musicLead: "artist"};
 +  function kindOf(n){ n = (n || "").toLowerCase(); return n.indexOf("nyt-frontpage-") === 0 ? "nyt" : n.indexOf("spotify-") === 0 ? "spotify" : n.indexOf("art-") === 0 ? "art" : "photos"; }
 +  function renderSources(){
 +    Array.prototype.forEach.call(document.querySelectorAll("[data-src]"), function(el){ el.checked = !!sources[el.dataset.src]; });
@@ -3728,6 +4695,7 @@ index 0000000..c2fd629
 +      if (!off && b) b.remove();
 +    });
 +    renderArtStyles();
++    if (typeof spRender === "function") spRender();
 +  }
 +  function saveSources(patch, msg){
 +    for (var k in patch) sources[k] = patch[k];
@@ -3740,7 +4708,7 @@ index 0000000..c2fd629
 +  Array.prototype.forEach.call(document.querySelectorAll("[data-src]"), function(el){
 +    el.onchange = function(){
 +      var p = {}; p[el.dataset.src] = el.checked;
-+      var label = {photos: "Photos", art: "Generative art", nyt: "Front page", spotify: "Spotify"}[el.dataset.src];
++      var label = {photos: "Photos", art: "Generative art", nyt: "Front page", spotify: "Spotify stills", music: "Live music"}[el.dataset.src];
 +      saveSources(p, label + (el.checked ? " on" : " off"));
 +    };
 +  });
@@ -3794,13 +4762,1337 @@ index 0000000..c2fd629
 +  };
 +
 +  // ---------- go ----------
-+  refreshFiles().then(refreshState).then(loadSources).then(artLoad).then(maybeAutoFrontPage).then(maybeAutoSpotify);
++  refreshFiles().then(refreshState).then(loadSources).then(refreshMusic).then(function(){ musicPreview(); artLoad(); })
++    .then(maybeAutoFrontPage).then(maybeAutoSpotify);
 +  setInterval(refreshState, 15000);
 +  document.addEventListener("visibilitychange", function(){ if (!document.hidden) { refreshFiles(); refreshState(); } });
 +})();
 +</script>
 +</body>
 +</html>
+diff --git a/app/src/main/resources/web/music.html b/app/src/main/resources/web/music.html
+new file mode 100644
+index 0000000..f139522
+--- /dev/null
++++ b/app/src/main/resources/web/music.html
+@@ -0,0 +1,1169 @@
++<!DOCTYPE html>
++<html>
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
++<title>Music</title>
++<style>
++  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
++  #music { position: absolute; left: 0; top: 0; display: block; }
++</style>
++</head>
++<body>
++<canvas id="music"></canvas>
++<script>
++(function () {
++  'use strict';
++
++  /* ================================================================
++     basics
++     ================================================================ */
++
++  var W = 540, H = 960, TAU = Math.PI * 2;
++  var FONT = 'Roboto, "Helvetica Neue", Helvetica, Arial, sans-serif';
++  var CONNECT_TEXT = 'Connect Spotify on the phone page';
++
++  window.MUSIC_STYLES = [
++    { id: 'kinetic', name: 'Kinetic Type' },
++    { id: 'liquid', name: 'Liquid Light' }
++  ];
++
++  function qs(name) {
++    var m = new RegExp('[?&]' + name + '=([^&#]*)').exec(window.location.search);
++    return m ? decodeURIComponent(m[1]) : null;
++  }
++
++  var styleId = qs('style');
++  if (styleId !== 'liquid') { styleId = 'kinetic'; }
++  var lead = qs('lead');
++  if (lead !== 'track' && lead !== 'date') { lead = 'artist'; }
++  var preview = qs('preview') === '1';
++  var demoParam = qs('demo');
++  var isDemo = demoParam !== null && demoParam !== '0' && demoParam !== '';
++  var S = preview ? 0.5 : (qs('scale') === '1' ? 2 : 1);
++
++  function now() {
++    return (window.performance && window.performance.now) ? window.performance.now() : new Date().getTime();
++  }
++  function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
++  function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
++  function easeOutExpo(p) { return p >= 1 ? 1 : 1 - Math.pow(2, -10 * p); }
++  function easeOutCubic(p) { var q = 1 - p; return 1 - q * q * q; }
++  function easeInCubic(p) { return p * p * p; }
++  function easeInOut(p) { return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
++  function smooth(p) { p = clamp01(p); return p * p * (3 - 2 * p); }
++
++  function mul32(a, b) {
++    var ah = (a >>> 16) & 0xffff, al = a & 0xffff;
++    return ((al * b) + (((ah * b) & 0xffff) << 16)) >>> 0;
++  }
++  function hashStr(s) {
++    var h = 2166136261, i;
++    s = String(s || '');
++    for (i = 0; i < s.length; i++) { h = mul32((h ^ s.charCodeAt(i)) >>> 0, 16777619); }
++    h ^= h >>> 15; h = mul32(h, 0x2c1b3c6d); h ^= h >>> 12;
++    return h >>> 0;
++  }
++  function Rng(seed) { this.s = (seed >>> 0) || 1; }
++  Rng.prototype.next = function () {
++    this.s = (this.s + 0x6D2B79F5) >>> 0;
++    var t = this.s;
++    t = mul32(t ^ (t >>> 15), t | 1);
++    t ^= t + mul32(t ^ (t >>> 7), t | 61);
++    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
++  };
++  Rng.prototype.rand = function (a, b) { return a + (b - a) * this.next(); };
++
++  /* ================================================================
++     colour
++     ================================================================ */
++
++  function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
++  function css(c, a) {
++    if (a === undefined || a >= 1) { return 'rgb(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ')'; }
++    return 'rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + a.toFixed(3) + ')';
++  }
++  function lum(c) {
++    var v = [c[0] / 255, c[1] / 255, c[2] / 255], i;
++    for (i = 0; i < 3; i++) { v[i] = v[i] <= 0.03928 ? v[i] / 12.92 : Math.pow((v[i] + 0.055) / 1.055, 2.4); }
++    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
++  }
++  function contrast(a, b) {
++    var la = lum(a), lb = lum(b);
++    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
++  }
++  function dist(a, b) {
++    var dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
++    return Math.sqrt(dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11) * 1.6;
++  }
++  function rgb2hsl(c) {
++    var r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
++    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), h = 0, s = 0, l = (mx + mn) / 2, d = mx - mn;
++    if (d > 0.0001) {
++      s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
++      if (mx === r) { h = (g - b) / d + (g < b ? 6 : 0); } else if (mx === g) { h = (b - r) / d + 2; } else { h = (r - g) / d + 4; }
++      h /= 6;
++    }
++    return [h, s, l];
++  }
++  function hue2(p, q, t) {
++    if (t < 0) { t += 1; } if (t > 1) { t -= 1; }
++    if (t < 1 / 6) { return p + (q - p) * 6 * t; }
++    if (t < 1 / 2) { return q; }
++    if (t < 2 / 3) { return p + (q - p) * (2 / 3 - t) * 6; }
++    return p;
++  }
++  function hsl2rgb(h, s, l) {
++    h = ((h % 1) + 1) % 1; s = clamp01(s); l = clamp01(l);
++    if (s === 0) { return [l * 255, l * 255, l * 255]; }
++    var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
++    return [hue2(p, q, h + 1 / 3) * 255, hue2(p, q, h) * 255, hue2(p, q, h - 1 / 3) * 255];
++  }
++  function inkFor(c) {
++    var black = [10, 10, 12], white = [252, 250, 246];
++    return contrast(c, black) >= contrast(c, white) ? mix(black, c, 0.12) : mix(white, c, 0.08);
++  }
++
++  function makePal(dom, accent, colors) {
++    var i, hs, guard = 0;
++    var darkBg = lum(dom) < 0.18;
++    while (contrast(accent, dom) < 2.3 && guard < 14) {
++      hs = rgb2hsl(accent);
++      hs[2] = darkBg ? Math.min(0.92, hs[2] + 0.06) : Math.max(0.08, hs[2] - 0.06);
++      if (hs[1] < 0.35) { hs[1] = Math.min(1, hs[1] + 0.08); }
++      accent = hsl2rgb(hs[0], hs[1], hs[2]);
++      guard++;
++    }
++    var cols = colors.slice(0, 6);
++    i = 0;
++    while (cols.length < 6) {
++      hs = rgb2hsl(i % 2 ? accent : dom);
++      cols.push(hsl2rgb(hs[0] + (i + 1) * 0.07, Math.max(0.35, hs[1]), clamp(hs[2] + (i % 2 ? -0.12 : 0.12), 0.15, 0.7)));
++      i++;
++    }
++    return { bg: dom, accent: accent, ink: inkFor(dom), colors: cols };
++  }
++
++  function hashPal(seedStr) {
++    var r = new Rng(hashStr(seedStr));
++    var h = r.next();
++    var dom = hsl2rgb(h, r.rand(0.45, 0.8), r.rand(0.2, 0.55));
++    var acc = hsl2rgb(h + r.rand(0.3, 0.6), r.rand(0.6, 0.95), r.rand(0.5, 0.65));
++    return makePal(dom, acc, [dom, acc, hsl2rgb(h + 0.12, 0.6, 0.4), hsl2rgb(h - 0.1, 0.7, 0.3)]);
++  }
++
++  /* Dominant + accent + 6 representative colours from pixels (same-origin images only) */
++  function extractPalette(src, seedStr) {
++    if (!src) { return hashPal(seedStr); }
++    var c = document.createElement('canvas');
++    c.width = 32; c.height = 32;
++    var x = c.getContext('2d'), d;
++    try {
++      x.drawImage(src, 0, 0, 32, 32);
++      d = x.getImageData(0, 0, 32, 32).data;
++    } catch (e) { return hashPal(seedStr); }
++    var buckets = {}, keys = [], i, k, b;
++    for (i = 0; i < d.length; i += 4) {
++      k = ((d[i] >> 5) << 6) | ((d[i + 1] >> 5) << 3) | (d[i + 2] >> 5);
++      b = buckets[k];
++      if (!b) { b = buckets[k] = { n: 0, r: 0, g: 0, b: 0 }; keys.push(k); }
++      b.n++; b.r += d[i]; b.g += d[i + 1]; b.b += d[i + 2];
++    }
++    var list = [];
++    for (i = 0; i < keys.length; i++) {
++      b = buckets[keys[i]];
++      list.push({ n: b.n, c: [b.r / b.n, b.g / b.n, b.b / b.n] });
++    }
++    list.sort(function (p, q) { return q.n - p.n; });
++    var dom = list[0].c;
++    var colors = [], j, ok;
++    for (i = 0; i < list.length && colors.length < 6; i++) {
++      ok = true;
++      for (j = 0; j < colors.length; j++) { if (dist(colors[j], list[i].c) < 46) { ok = false; break; } }
++      if (ok) { colors.push(list[i].c); }
++    }
++    var best = null, bestScore = 0, hs, sc, dd;
++    for (i = 0; i < list.length; i++) {
++      dd = dist(list[i].c, dom);
++      if (dd < 80) { continue; }
++      hs = rgb2hsl(list[i].c);
++      sc = Math.pow(list[i].n, 0.4) * (0.12 + hs[1]) * (1 - Math.abs(hs[2] - 0.55) * 0.9) * Math.min(1, dd / 160);
++      if (sc > bestScore) { bestScore = sc; best = list[i].c; }
++    }
++    if (!best) {
++      hs = rgb2hsl(dom);
++      best = hsl2rgb(hs[0] + 0.5, Math.max(0.6, hs[1]), hs[2] > 0.5 ? 0.32 : 0.62);
++    }
++    return makePal(dom, best, colors);
++  }
++
++  /* ================================================================
++     canvas + text helpers
++     ================================================================ */
++
++  function mk(w, h) {
++    var c = document.createElement('canvas');
++    c.width = Math.max(1, Math.ceil(w * S));
++    c.height = Math.max(1, Math.ceil(h * S));
++    c.lw = c.width / S; c.lh = c.height / S;
++    c.x = c.getContext('2d');
++    c.x.setTransform(S, 0, 0, S, 0, 0);
++    return c;
++  }
++  function blit(ctx, c, x, y) { if (c) { ctx.drawImage(c, x, y, c.lw, c.lh); } }
++
++  var MC = document.createElement('canvas').getContext('2d');
++  function setFont(x, w, s) { x.font = w + ' ' + s.toFixed(2) + 'px ' + FONT; }
++  function tw(text, w, s) { setFont(MC, w, s); return MC.measureText(text).width; }
++
++  function breakWord(word, w, s, maxW) {
++    var out = [], cur = '', i, ch;
++    for (i = 0; i < word.length; i++) {
++      ch = word.charAt(i);
++      if (cur && tw(cur + ch, w, s) > maxW) { out.push(cur); cur = ch; } else { cur += ch; }
++    }
++    if (cur) { out.push(cur); }
++    return out;
++  }
++  function wrap(text, w, s, maxW) {
++    var words = String(text).split(/\s+/), lines = [], cur = '', i, j, parts, test;
++    for (i = 0; i < words.length; i++) {
++      if (!words[i]) { continue; }
++      if (tw(words[i], w, s) > maxW) {
++        if (cur) { lines.push(cur); cur = ''; }
++        parts = breakWord(words[i], w, s, maxW);
++        for (j = 0; j < parts.length - 1; j++) { lines.push(parts[j]); }
++        cur = parts[parts.length - 1];
++        continue;
++      }
++      test = cur ? cur + ' ' + words[i] : words[i];
++      if (cur && tw(test, w, s) > maxW) { lines.push(cur); cur = words[i]; } else { cur = test; }
++    }
++    if (cur) { lines.push(cur); }
++    if (!lines.length) { lines.push(''); }
++    return lines;
++  }
++  function ellipsize(line, w, s, maxW) {
++    var t = line;
++    while (t.length > 1 && tw(t + '…', w, s) > maxW) { t = t.substring(0, t.length - 1); }
++    return t.replace(/[\s,.;:\-]+$/, '') + '…';
++  }
++  /* Largest size (maxS..minS) whose greedy wrap fits maxLines; ellipsis at minS. */
++  function longestWord(text, w, s) {
++    var words = String(text).split(/\s+/), i, m = 0;
++    for (i = 0; i < words.length; i++) { m = Math.max(m, tw(words[i], w, s)); }
++    return m;
++  }
++  function fitWrap(text, w, maxW, maxLines, maxS, minS) {
++    var s = maxS, lines;
++    while (true) {
++      lines = wrap(text, w, s, maxW);
++      /* never break inside a word unless already at the minimum size */
++      if (lines.length <= maxLines && (s <= minS || longestWord(text, w, s) <= maxW)) { return { s: s, lines: lines }; }
++      if (s <= minS) { break; }
++      s = Math.max(minS, s * 0.93);
++    }
++    lines = lines.slice(0, maxLines);
++    lines[maxLines - 1] = ellipsize(lines[maxLines - 1] + ' ' + 'x', w, s, maxW);
++    return { s: s, lines: lines };
++  }
++  /* Text block as cached canvas. opts: align, lh, boxW, shadow */
++  function makeText(lines, w, s, color, opts) {
++    opts = opts || {};
++    var lh = opts.lh || s * 1.15, align = opts.align || 'left', pad = opts.shadow ? 14 : 3;
++    var i, mw = 0;
++    for (i = 0; i < lines.length; i++) { mw = Math.max(mw, tw(lines[i], w, s)); }
++    var bw = opts.boxW || mw;
++    var c = mk(bw + pad * 2, (lines.length - 1) * lh + s * 1.25 + pad * 2);
++    var x = c.x;
++    setFont(x, w, s);
++    x.fillStyle = color;
++    x.textBaseline = 'alphabetic';
++    x.textAlign = align;
++    if (opts.shadow) { x.shadowColor = opts.shadow; x.shadowBlur = 10 * S; x.shadowOffsetY = 2 * S; }
++    var ax = align === 'center' ? pad + bw / 2 : (align === 'right' ? pad + bw : pad);
++    for (i = 0; i < lines.length; i++) { x.fillText(lines[i], ax, pad + s * 0.96 + i * lh); }
++    c.pad = pad; c.tw = mw; c.th = (lines.length - 1) * lh + s;
++    return c;
++  }
++  /* Letter-spaced single line label */
++  function makeLabel(text, w, s, color, sp, shadow) {
++    var i, wd = 0, pad = shadow ? 12 : 2;
++    setFont(MC, w, s);
++    for (i = 0; i < text.length; i++) { wd += MC.measureText(text.charAt(i)).width + sp; }
++    wd -= sp;
++    var c = mk(wd + pad * 2, s * 1.35 + pad * 2), x = c.x, xx = pad;
++    setFont(x, w, s);
++    x.fillStyle = color;
++    if (shadow) { x.shadowColor = shadow; x.shadowBlur = 8 * S; }
++    for (i = 0; i < text.length; i++) {
++      x.fillText(text.charAt(i), xx, pad + s * 1.0);
++      xx += x.measureText(text.charAt(i)).width + sp;
++    }
++    c.pad = pad; c.tw = wd;
++    return c;
++  }
++  /* Square cover, centre-cropped, cached at display size */
++  function makeCover(src, size) {
++    var c = mk(size, size);
++    if (src) {
++      var sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height, m = Math.min(sw, sh);
++      c.x.drawImage(src, (sw - m) / 2, (sh - m) / 2, m, m, 0, 0, size, size);
++    }
++    return c;
++  }
++
++  /* ================================================================
++     generated art (fallback + demo)
++     ================================================================ */
++
++  function fallbackArt(seedStr) {
++    var r = new Rng(hashStr(seedStr) ^ 0x9e3779b9);
++    var c = document.createElement('canvas');
++    c.width = 256; c.height = 256;
++    var x = c.getContext('2d'), h = r.next();
++    var g = x.createLinearGradient(0, 0, 256, 256);
++    g.addColorStop(0, css(hsl2rgb(h, 0.75, 0.42)));
++    g.addColorStop(1, css(hsl2rgb(h + r.rand(0.15, 0.4), 0.8, 0.22)));
++    x.fillStyle = g; x.fillRect(0, 0, 256, 256);
++    var rg = x.createRadialGradient(80 + r.rand(0, 100), 80 + r.rand(0, 100), 0, 128, 128, 200);
++    rg.addColorStop(0, css(hsl2rgb(h - 0.12, 0.9, 0.65), 0.85));
++    rg.addColorStop(1, css(hsl2rgb(h - 0.12, 0.9, 0.65), 0));
++    x.fillStyle = rg; x.fillRect(0, 0, 256, 256);
++    return c;
++  }
++
++  function demoCover(seed) {
++    var r = new Rng(hashStr('cover' + seed));
++    var c = document.createElement('canvas');
++    c.width = 256; c.height = 256;
++    var x = c.getContext('2d'), h0 = r.next(), i, j, k, cols = [];
++    for (i = 0; i < 4; i++) { cols.push(css(hsl2rgb(h0 + i * r.rand(0.08, 0.3), r.rand(0.6, 0.95), r.rand(0.35, 0.68)))); }
++    x.fillStyle = r.next() < 0.5 ? css(hsl2rgb(h0 + 0.5, 0.3, 0.1)) : css(hsl2rgb(h0, 0.25, 0.9));
++    x.fillRect(0, 0, 256, 256);
++    var n = 2 + Math.floor(r.next() * 3), cell = 256 / n;
++    for (i = 0; i < n; i++) {
++      for (j = 0; j < n; j++) {
++        if (r.next() < 0.3) { continue; }
++        x.fillStyle = cols[Math.floor(r.next() * 4)];
++        k = r.next();
++        if (k < 0.5) { x.fillRect(i * cell + 6, j * cell + 6, cell - 12, cell - 12); } else if (k < 0.8) {
++          x.beginPath(); x.arc(i * cell + cell / 2, j * cell + cell / 2, cell * 0.42, 0, TAU); x.fill();
++        } else { x.fillRect(i * cell, j * cell + cell * 0.4, cell, cell * 0.2); }
++      }
++    }
++    x.fillStyle = cols[0];
++    x.fillRect(r.rand(0, 200), r.rand(0, 200), r.rand(30, 80), r.rand(30, 80));
++    return c;
++  }
++
++  /* ================================================================
++     data
++     ================================================================ */
++
++  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
++  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
++  function dateStr() { var d = new Date(); return DAYS[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate(); }
++  function plural(n, unit) { return n + ' ' + unit + (n === 1 ? '' : 's') + ' ago'; }
++  function timeAgo(ts) {
++    if (!ts) { return ''; }
++    var s = (new Date().getTime() - ts) / 1000;
++    if (s < 60) { return 'just now'; }
++    var m = Math.floor(s / 60); if (m < 60) { return plural(m, 'minute'); }
++    var h = Math.floor(m / 60); if (h < 24) { return plural(h, 'hour'); }
++    var d = Math.floor(h / 24); if (d === 1) { return 'yesterday'; } if (d < 7) { return plural(d, 'day'); }
++    if (d < 35) { return plural(Math.floor(d / 7), 'week'); }
++    return plural(Math.max(1, Math.floor(d / 30)), 'month');
++  }
++  function fmtTime(ms) {
++    var s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60);
++    s = s % 60;
++    return m + ':' + (s < 10 ? '0' : '') + s;
++  }
++  function sceneLabel(sc) {
++    if (sc.mode === 'playing') { return 'Now playing'; }
++    var ago = timeAgo(sc.playedAt);
++    return ago ? 'Last played · ' + ago : 'Last played';
++  }
++  function texts(sc) {
++    var d = dateStr(), o;
++    if (lead === 'track') { o = { hero: sc.title, s1: sc.artist, s2: sc.album, showDate: true }; } else if (lead === 'date') { o = { hero: d, s1: sc.title, s2: sc.artist, showDate: false }; } else { o = { hero: sc.artist, s1: sc.title, s2: sc.album, showDate: true }; }
++    if (!o.hero) { o.hero = sc.title || sc.artist || sc.album || ' '; }
++    o.date = d;
++    o.label = sceneLabel(sc);
++    return o;
++  }
++  function progressOf(sc) {
++    if (!sc || sc.mode !== 'playing' || !sc.durationMs) { return null; }
++    var el = sc.progressMs + (new Date().getTime() - sc.progAt);
++    el = clamp(el, 0, sc.durationMs);
++    return { p: el / sc.durationMs, el: el, dur: sc.durationMs };
++  }
++
++  /* --- image loading, always through the same-origin proxy --- */
++  var imgCache = {};
++  var demoArt = {};
++  function loadArt(url, cb) {
++    if (!url) { cb(null); return; }
++    if (url.indexOf('demo:') === 0) {
++      if (!demoArt[url]) { demoArt[url] = demoCover(url); }
++      cb(demoArt[url]);
++      return;
++    }
++    var e = imgCache[url];
++    if (e) { if (e.done) { cb(e.img); } else { e.cbs.push(cb); } return; }
++    e = imgCache[url] = { done: false, img: null, cbs: [cb] };
++    var im = new Image();
++    var fin = function (ok) {
++      if (e.done) { return; }
++      e.done = true; e.img = ok ? im : null;
++      var cbs = e.cbs, i;
++      e.cbs = [];
++      for (i = 0; i < cbs.length; i++) { cbs[i](e.img); }
++    };
++    im.onload = function () { fin(im.naturalWidth > 0); };
++    im.onerror = function () { fin(false); };
++    setTimeout(function () { fin(false); }, 9000);
++    im.src = '/music/img?u=' + encodeURIComponent(url);
++  }
++  function pruneCache(keep) {
++    var k;
++    for (k in imgCache) {
++      if (imgCache.hasOwnProperty(k) && imgCache[k].done && !keep[k]) { delete imgCache[k]; }
++    }
++  }
++
++  /* --- scenes --- */
++  var IDLE_PAL = { bg: [18, 20, 26], accent: [90, 110, 150], ink: [200, 205, 215],
++    colors: [[24, 34, 70], [52, 28, 82], [16, 66, 80], [70, 34, 72], [14, 22, 40], [34, 58, 100]] };
++  var curScene = null, pendingSpec = null, sceneSeq = 0, style = null;
++
++  function wantScene(spec) {
++    if (curScene && curScene.key === spec.key) {
++      var modeChanged = curScene.mode !== spec.mode;
++      curScene.progressMs = spec.progressMs; curScene.durationMs = spec.durationMs;
++      curScene.progAt = spec.progAt; curScene.playedAt = spec.playedAt;
++      curScene.mode = spec.mode;
++      pendingSpec = null; sceneSeq++;
++      if (modeChanged && style) { style.refresh(); }
++      return;
++    }
++    if (pendingSpec && pendingSpec.key === spec.key) { pendingSpec = spec; return; }
++    pendingSpec = spec;
++    var seq = ++sceneSeq;
++    var done = function (img) {
++      if (seq !== sceneSeq) { return; }
++      var sp = pendingSpec || spec;
++      pendingSpec = null;
++      var sc = {};
++      var k;
++      for (k in sp) { if (sp.hasOwnProperty(k)) { sc[k] = sp[k]; } }
++      if (sc.kind === 'track') {
++        sc.fallback = !img;
++        sc.art = img || fallbackArt((sc.artist || '') + '|' + (sc.album || sc.title || ''));
++        sc.pal = img ? extractPalette(img, sc.artist) : extractPalette(sc.art, sc.artist);
++      } else {
++        sc.art = null;
++        sc.pal = IDLE_PAL;
++      }
++      var prev = curScene;
++      curScene = sc;
++      if (style) { style.setScene(sc, prev); }
++    };
++    if (spec.kind === 'track') { loadArt(spec.artUrl, done); } else { done(null); }
++  }
++
++  var MAXR = preview ? 8 : 24;
++  var recent = [], recentSig = '', recentVer = 0;
++  function setRecent(list) {
++    list = (list || []).slice(0, MAXR);
++    var sig = '', i;
++    for (i = 0; i < list.length; i++) { sig += (list[i].album || '') + '|' + (list[i].artist || '') + ';'; }
++    if (sig === recentSig) { return; }
++    recentSig = sig;
++    recent = [];
++    for (i = 0; i < list.length; i++) { recent.push({ album: list[i].album || '', artist: list[i].artist || '' }); }
++    recentVer++;
++    var keep = {};
++    if (curScene && curScene.artUrl) { keep[curScene.artUrl] = true; }
++    if (pendingSpec && pendingSpec.artUrl) { keep[pendingSpec.artUrl] = true; }
++    pruneCache(keep);
++  }
++
++  var failCount = 0, everOk = false;
++  function applyState(js) {
++    var t = new Date().getTime();
++    if (!js || js.connected === false) {
++      wantScene({ key: 'idle:connect', kind: 'connect', mode: 'idle' });
++      return;
++    }
++    setRecent(js.recent);
++    var c = js.current, l = js.last;
++    if (c && (c.title || c.artist)) {
++      var playing = js.playing !== false;
++      wantScene({
++        key: 't|' + (c.title || '') + '|' + (c.artist || '') + '|' + (c.album || ''),
++        kind: 'track', mode: playing ? 'playing' : 'last',
++        title: c.title || '', artist: c.artist || '', album: c.album || '', artUrl: c.art || '',
++        progressMs: c.progressMs || 0, durationMs: c.durationMs || 0, progAt: t,
++        playedAt: playing ? t : (js.updatedAt || t)
++      });
++    } else if (l && (l.title || l.artist)) {
++      wantScene({
++        key: 't|' + (l.title || '') + '|' + (l.artist || '') + '|' + (l.album || ''),
++        kind: 'track', mode: 'last',
++        title: l.title || '', artist: l.artist || '', album: l.album || '', artUrl: l.art || '',
++        progressMs: 0, durationMs: 0, progAt: t, playedAt: l.playedAt || 0
++      });
++    } else {
++      wantScene({ key: 'idle:empty', kind: 'empty', mode: 'idle' });
++    }
++  }
++
++  function poll() {
++    var x = new XMLHttpRequest(), finished = false;
++    var fail = function () {
++      if (finished) { return; }
++      finished = true;
++      failCount++;
++      if (!everOk || failCount >= 2) { applyState(null); }
++    };
++    try {
++      x.open('GET', '/music/state?t=' + new Date().getTime(), true);
++      x.timeout = 4500;
++      x.onreadystatechange = function () {
++        if (x.readyState !== 4 || finished) { return; }
++        if (x.status === 200) {
++          var js = null;
++          try { js = JSON.parse(x.responseText); } catch (e) { js = null; }
++          if (js) { finished = true; failCount = 0; everOk = true; applyState(js); return; }
++        }
++        fail();
++      };
++      x.ontimeout = fail;
++      x.onerror = fail;
++      x.send(null);
++    } catch (e2) { fail(); }
++  }
++
++  /* --- demo data --- */
++  var DEMO_TRACKS = [
++    { title: 'Harbor Lights at Dawn', artist: 'Mira Vale', album: 'Glass Coast', art: 'demo:t0', durationMs: 214000 },
++    { title: 'Paper Satellites', artist: 'The Lanterns', album: 'Low Tide', art: 'demo:t1', durationMs: 187000 }
++  ];
++  var DEMO_RECENT = [
++    ['Low Tide', 'The Lanterns'], ['Neon Orchard', 'Kito Ray'], ['Quiet Machines', 'Hollow Pine'],
++    ['Saltwater Hymns', 'June Arden'], ['Afterglow Club', 'Velvet Static'], ['Northbound', 'Odessa Blue'],
++    ['Small Hours', 'Pale Comet'], ['Sugar Static', 'Lumen Twins'], ['Copper Skies', 'Ana Moreau'],
++    ['Field Recordings', 'Ostrava'], ['Cloud Atlas Drive', 'Sunday Pilots'], ['Late Bloom', 'Ivory Coastline']
++  ];
++  var demoStart = new Date().getTime();
++  function demoState() {
++    var t = new Date().getTime(), i, rec = [];
++    if (demoParam === 'idle') { return { connected: false }; }
++    for (i = 0; i < DEMO_RECENT.length; i++) { rec.push({ album: DEMO_RECENT[i][0], artist: DEMO_RECENT[i][1], art: 'demo:r' + i }); }
++    var idx = Math.floor((t - demoStart) / 45000) % DEMO_TRACKS.length;
++    var tr = DEMO_TRACKS[idx], cur = { title: tr.title, artist: tr.artist, album: tr.album, art: tr.art, durationMs: tr.durationMs };
++    if (demoParam === 'long') {
++      cur.artist = 'The Extraordinarily Long Named Orchestra and Friends';
++      cur.title = 'A Very Long Song Title That Keeps Going Well Past Any Reasonable Length (Extended Mix)';
++      cur.album = 'Collected Works for Unusually Patient Listeners, Volume Two';
++    }
++    cur.progressMs = (61000 + (t - demoStart - idx * 45000)) % tr.durationMs;
++    var last = { title: 'Saltwater Hymns', artist: 'June Arden', album: 'Saltwater Hymns', art: 'demo:r3', playedAt: t - 2 * 3600 * 1000 - 60000 };
++    if (demoParam === 'last') { return { connected: true, playing: false, updatedAt: t, current: null, last: last, recent: rec }; }
++    return { connected: true, playing: true, updatedAt: t, current: cur, last: last, recent: rec };
++  }
++
++  /* ================================================================
++     style 1: kinetic typography poster
++     ================================================================ */
++
++  function posterLayouts(text, maxW, maxH, weight, cap) {
++    var words = String(text).split(/\s+/).filter(function (s) { return s.length > 0; });
++    if (!words.length) { words = [' ']; }
++    var m100 = {};
++    var w100 = function (s) { if (!(s in m100)) { m100[s] = Math.max(1, tw(s, weight, 100)); } return m100[s]; };
++    var out = [], n, i, j, k;
++    for (n = 1; n <= Math.min(words.length, 7); n++) {
++      /* balanced partition: minimise widest line */
++      var dp = [], from = [];
++      for (k = 0; k <= n; k++) { dp.push([]); from.push([]); for (j = 0; j <= words.length; j++) { dp[k].push(1e12); from[k].push(0); } }
++      dp[0][0] = 0;
++      for (k = 1; k <= n; k++) {
++        for (j = k; j <= words.length; j++) {
++          for (i = k - 1; i < j; i++) {
++            var cst = Math.max(dp[k - 1][i], w100(words.slice(i, j).join(' ')));
++            if (cst < dp[k][j]) { dp[k][j] = cst; from[k][j] = i; }
++          }
++        }
++      }
++      var parts = [];
++      j = words.length;
++      for (k = n; k >= 1; k--) { i = from[k][j]; parts.unshift(words.slice(i, j).join(' ')); j = i; }
++      var lines = [], total = 0;
++      for (i = 0; i < parts.length; i++) {
++        var sz = Math.min(cap, maxW * 100 / w100(parts[i].replace(/[,;:]+$/, '')));
++        lines.push({ t: parts[i].replace(/[,;:]+$/, ''), s: sz });
++        total += sz * 0.72 + (i > 0 ? sz * 0.1 : 0);
++      }
++      var fit = 1;
++      if (total > maxH) { fit = maxH / total; }
++      for (i = 0; i < lines.length; i++) { lines[i].s *= fit; }
++      out.push({ n: n, lines: lines, total: total * fit, score: total * fit * (fit < 1 ? 0.85 : 1) });
++    }
++    out.sort(function (a, b) { return b.score - a.score; });
++    var A = out[0], B = null;
++    for (i = 1; i < out.length; i++) { if (out[i].score > A.score * 0.55) { B = out[i]; break; } }
++    return { A: A, B: B || A };
++  }
++
++  function KineticStyle() {
++    var MX = 24, CW = 492, HERO_Y = 76, HERO_H = 482;
++    var COVER = 300, CX = 24, CY = 590, COLX = 346, COLW = 170;
++    var P = 18;
++    var cur = null, prev = null, tc = 0, clock = 0, speed = 1, dim = 0, prevSt = 0;
++
++    function themes(pal) {
++      var t0 = { bg: pal.bg, fg: pal.ink, hi: pal.accent };
++      var fg1 = inkFor(pal.accent);
++      var hi1 = contrast(pal.bg, pal.accent) >= 2 ? pal.bg : mix(fg1, pal.accent, 0.4);
++      return [t0, { bg: pal.accent, fg: fg1, hi: hi1 }];
++    }
++
++    function build(sc) {
++      var v = { sc: sc, idle: sc.kind !== 'track', t0: clock, tickVer: -1 };
++      if (v.idle) {
++        v.connect = sc.kind === 'connect' ? makeLabel(CONNECT_TEXT, '400', 14, 'rgba(220,220,220,0.6)', 0.5) : null;
++        return v;
++      }
++      var tx = texts(sc), th = themes(sc.pal), lay = posterLayouts(tx.hero.toUpperCase(), CW, HERO_H, '700', HERO_H * 0.5);
++      v.tx = tx; v.th = th; v.states = [];
++      var st, i, L, y, line, c, col, hiIdx, s1f, s2f;
++      for (st = 0; st < 2; st++) {
++        var t = th[st], o = { lines: [] };
++        L = st === 0 ? lay.A : lay.B;
++        hiIdx = L.lines.length === 1 ? (st === 0 ? -1 : 0) : (st === 0 ? L.lines.length - 1 : 0);
++        y = HERO_Y;
++        for (i = 0; i < L.lines.length; i++) {
++          line = L.lines[i];
++          if (i > 0) { y += line.s * 0.1; }
++          col = i === hiIdx ? t.hi : t.fg;
++          c = mk(tw(line.t, '700', line.s) + 6, line.s * 1.1);
++          setFont(c.x, '700', line.s);
++          c.x.fillStyle = css(col);
++          c.x.fillText(line.t, 1, line.s * 0.86);
++          y += line.s * 0.72;
++          o.lines.push({ c: c, x: st === 0 ? MX - 1 : W - MX - c.lw + 5, y: y - line.s * 0.86 });
++        }
++        /* outlined echoes of the last line fill the rest of the hero block */
++        o.echo = null;
++        var avail = HERO_Y + HERO_H - y;
++        if (avail > 24) {
++          line = L.lines[L.lines.length - 1];
++          c = mk(tw(line.t, '700', line.s) + 6, line.s * 1.1);
++          setFont(c.x, '700', line.s);
++          c.x.strokeStyle = css(t.fg);
++          c.x.lineWidth = Math.max(1.2, line.s * 0.012);
++          c.x.strokeText(line.t, 1, line.s * 0.86);
++          o.echo = { c: c, x: o.lines[o.lines.length - 1].x, y0: o.lines[o.lines.length - 1].y, pitch: line.s * 0.82,
++            n: Math.ceil(avail / (line.s * 0.82)), bottom: CY - 12 };
++        }
++        o.label = makeLabel(tx.label.toUpperCase(), '700', 13, css(t.fg), 2.2);
++        o.date = tx.showDate ? makeLabel(tx.date.toUpperCase(), '400', 13, css(t.fg, 0.8), 1.6) : null;
++        s1f = fitWrap(tx.s1, '700', COLW, 5, 31, 14);
++        o.s1 = makeText(s1f.lines, '700', s1f.s, css(t.fg), { lh: s1f.s * 1.06 });
++        s2f = fitWrap(tx.s2, '400', COLW, 3, 17, 12);
++        o.s2 = tx.s2 ? makeText(s2f.lines, '400', s2f.s, css(t.fg, 0.72), { lh: s2f.s * 1.2 }) : null;
++        v.states.push(o);
++      }
++      v.cover = makeCover(sc.art, COVER);
++      return v;
++    }
++
++    function buildTicker(v) {
++      v.tickVer = recentVer;
++      var names = [], seen = {}, i, n, st;
++      for (i = 0; i < recent.length; i++) {
++        n = (recent[i].artist || '').toUpperCase();
++        if (n && !seen[n]) { seen[n] = true; names.push(n); }
++      }
++      if (names.length < 2) { names.push(v.tx.hero.toUpperCase()); if (v.tx.s1) { names.push(v.tx.s1.toUpperCase()); } }
++      for (st = 0; st < 2; st++) {
++        var items = [], len = 0, c;
++        for (i = 0; i < names.length; i++) {
++          c = makeText([names[i]], '700', 26, css(v.th[st].fg, 0.42));
++          items.push(c);
++          len += c.tw + 34;
++        }
++        v.states[st].tick = items; v.states[st].tickLen = len;
++      }
++    }
++
++    function lineOff(i, u, forcedExit) {
++      var dir = (i % 2 === 0) ? -1 : 1;
++      var pe = clamp01((u - 0.12 - i * 0.11) / 1.0);
++      var off = (1 - easeOutExpo(pe)) * (W + 60) * dir;
++      var ex = forcedExit >= 0 ? forcedExit : u - (P - 2.7);
++      var px = clamp01((ex - i * 0.08) / 0.75);
++      off += easeInCubic(px) * (W + 60) * -dir;
++      off += Math.sin(clock * 0.45 + i * 1.9) * 7 * (1 - px) * pe;
++      return off;
++    }
++    function stripOff(i, lu, u, forcedExit) {
++      var pe = clamp01((lu - 0.15 - i * 0.07) / 1.1);
++      var off = (1 - easeOutExpo(pe)) * (i % 2 ? 1 : -1) * 980;
++      var ps = clamp01((u - (P - 1.9)) / 1.7);
++      off += Math.sin(ps * Math.PI) * (i % 2 ? 46 : -46);
++      off += Math.sin(clock * 0.9 + i * 0.8) * 2.5;
++      if (forcedExit >= 0) { off += easeInCubic(clamp01((forcedExit - 0.1 - i * 0.04) / 0.7)) * (i % 2 ? -1 : 1) * 1000; }
++      return off;
++    }
++
++    function drawIdle(ctx, v) {
++      ctx.fillStyle = '#121316';
++      ctx.fillRect(0, 0, W, H);
++      var i, y, h, x, w, k;
++      for (i = 0; i < 9; i++) {
++        y = 80 + i * 88; h = 20 + ((i * 37) % 60);
++        k = Math.sin(clock * 0.12 + i * 1.3);
++        w = 140 + ((i * 53) % 220);
++        x = (k * 0.5 + 0.5) * (W - w + 120) - 60;
++        ctx.fillStyle = i === 4 ? 'rgba(120,140,190,0.35)' : 'rgba(255,255,255,' + (0.04 + (i % 3) * 0.025).toFixed(3) + ')';
++        ctx.fillRect(x, y, w, h);
++      }
++      ctx.fillStyle = 'rgba(255,255,255,0.12)';
++      ctx.fillRect(MX, 46, CW, 3);
++      if (v.connect) { blit(ctx, v.connect, (W - v.connect.lw) / 2, H - 70); }
++    }
++
++    function drawView(ctx, v, st, lu, u, forcedExit, hideLines) {
++      if (v.idle) { drawIdle(ctx, v); return; }
++      var t = v.th[st], o = v.states[st], i, n;
++      ctx.fillStyle = css(t.bg);
++      ctx.fillRect(0, 0, W, H);
++      blit(ctx, o.label, MX - o.label.pad, 22 - o.label.pad);
++      if (o.date) { blit(ctx, o.date, W - MX - o.date.tw - o.date.pad, 22 - o.date.pad); }
++      ctx.fillStyle = css(t.fg);
++      ctx.fillRect(MX, 46, CW, 6);
++      /* cover: hard offset block + sliced strips */
++      var N = 6, sw = COVER / N, off;
++      var showBlock = clamp01((lu - 0.6) / 0.6);
++      if (forcedExit >= 0) { showBlock *= 1 - clamp01(forcedExit / 0.4); }
++      if (showBlock > 0) {
++        ctx.fillStyle = css(t.hi);
++        ctx.fillRect(CX + 14, CY + 14 + (1 - easeOutCubic(showBlock)) * 30, COVER, COVER * easeOutCubic(showBlock));
++      }
++      for (i = 0; i < N; i++) {
++        off = stripOff(i, lu, u, forcedExit);
++        if (CY + off > H || CY + off + COVER < 0) { continue; }
++        ctx.drawImage(v.cover, i * sw * S, 0, sw * S, COVER * S, CX + i * sw, CY + off, sw, COVER);
++        ctx.strokeStyle = css(t.fg);
++        ctx.lineWidth = 2;
++        ctx.strokeRect(CX + i * sw + 1, CY + off + 1, sw - 2 + (i === N - 1 ? 0 : 2), COVER - 2);
++      }
++      /* column */
++      var cy = CY - 6;
++      blit(ctx, o.s1, COLX - o.s1.pad, cy - o.s1.pad);
++      cy += o.s1.th + 16;
++      if (o.s2) { blit(ctx, o.s2, COLX - o.s2.pad, cy - o.s2.pad); }
++      var pr = progressOf(v.sc);
++      if (pr) {
++        ctx.fillStyle = css(t.fg);
++        setFont(ctx, '700', 34);
++        ctx.fillText(fmtTime(pr.el), COLX, CY + COVER - 30);
++        setFont(ctx, '400', 15);
++        ctx.fillStyle = css(t.fg, 0.7);
++        ctx.fillText(fmtTime(pr.dur), COLX + 2, CY + COVER - 6);
++        ctx.fillStyle = css(t.fg, 0.2);
++        ctx.fillRect(MX, 906, CW, 6);
++        ctx.fillStyle = css(t.hi);
++        ctx.fillRect(MX, 906, CW * pr.p, 6);
++      } else {
++        ctx.fillStyle = css(t.fg);
++        ctx.fillRect(MX, 908, CW, 2);
++      }
++      /* ticker of recent artists */
++      if (v.tickVer !== recentVer) { buildTicker(v); }
++      if (o.tickLen > 0) {
++        var x = -((clock * 26) % o.tickLen) - 4;
++        n = 0;
++        while (x < W && n < 80) {
++          for (i = 0; i < o.tick.length && x < W; i++) {
++            if (x + o.tick[i].lw > 0) { blit(ctx, o.tick[i], x, 918); }
++            x += o.tick[i].tw;
++            ctx.fillStyle = css(t.hi);
++            ctx.fillRect(x + 12, 934, 9, 9);
++            x += 34;
++            n++;
++          }
++        }
++      }
++      /* hero */
++      if (!hideLines) {
++        n = o.lines.length;
++        if (o.echo) {
++          var e = o.echo, j, ey;
++          for (j = 1; j <= e.n; j++) {
++            off = lineOff(n - 1 + j, u, forcedExit);
++            if (Math.abs(off) > W + 20) { continue; }
++            ey = e.y0 + j * e.pitch;
++            if (ey + e.pitch / 0.82 * 0.87 > e.bottom) { break; }
++            ctx.globalAlpha = Math.max(0.15, 0.6 - j * 0.16);
++            blit(ctx, e.c, e.x + off, ey);
++          }
++          ctx.globalAlpha = 1;
++        }
++        for (i = 0; i < n; i++) {
++          off = lineOff(i, u, forcedExit);
++          if (Math.abs(off) > W + 20) { continue; }
++          blit(ctx, o.lines[i].c, o.lines[i].x + off, o.lines[i].y);
++        }
++      }
++    }
++
++    function cyc(v) {
++      var lu = clock - v.t0, k = lu < 0 ? 0 : Math.floor(lu / P), u = lu - k * P;
++      return { lu: lu, k: k, u: u, st: k % 2 };
++    }
++
++    function drawClipped(ctx, y0, y1, fn) {
++      if (y1 <= y0) { return; }
++      ctx.save();
++      ctx.beginPath();
++      ctx.rect(0, y0, W, y1 - y0);
++      ctx.clip();
++      fn();
++      ctx.restore();
++    }
++
++    return {
++      setScene: function (sc, old) {
++        var c = cur ? cyc(cur) : null;
++        prevSt = c ? c.st : 0;
++        prev = cur;
++        prev && (prev.exitU = c.u);
++        cur = build(sc);
++        if (prev) { tc = clock; cur.t0 = clock + 1.25; } else { cur.t0 = clock; }
++      },
++      refresh: function () {
++        if (!cur) { return; }
++        var t0 = cur.t0, nv = build(cur.sc);
++        nv.t0 = t0;
++        cur = nv;
++      },
++      frame: function (ctx, T, dt) {
++        if (!cur) { return; }
++        var playing = !cur.idle && cur.sc.mode === 'playing';
++        var tgt = cur.idle ? 0.6 : (playing ? 1 : 0.45);
++        speed += (tgt - speed) * Math.min(1, dt * 0.04);
++        dim += (((!cur.idle && !playing) ? 0.2 : 0) - dim) * Math.min(1, dt * 0.04);
++        clock += dt / 60 * speed;
++        var c = cyc(cur);
++        if (prev) {
++          var tl = clock - tc;
++          if (tl > 1.25) { prev = null; } else {
++            var wh = H * easeInOut(clamp01((tl - 0.45) / 0.8));
++            var pv = prev, pu = prev.exitU || 0, pst = prevSt;
++            drawClipped(ctx, 0, H - wh, function () { drawView(ctx, pv, pst, 99, pu, tl, false); });
++            drawClipped(ctx, H - wh, H, function () { drawView(ctx, cur, 0, c.lu, 0, -1, true); });
++          }
++        }
++        if (!prev) {
++          var wp = cur.idle ? 0 : easeInOut(clamp01((c.u - (P - 1.5)) / 0.9));
++          if (wp <= 0) { drawView(ctx, cur, c.st, c.lu, c.u, -1, false); } else {
++            var wy = H * (1 - wp), cv = cur;
++            drawClipped(ctx, 0, wy, function () { drawView(ctx, cv, c.st, c.lu, c.u, -1, false); });
++            drawClipped(ctx, wy, H, function () { drawView(ctx, cv, (c.st + 1) % 2, c.lu, c.u, -1, true); });
++          }
++        }
++        if (dim > 0.005) { ctx.fillStyle = 'rgba(0,0,0,' + dim.toFixed(3) + ')'; ctx.fillRect(0, 0, W, H); }
++      }
++    };
++  }
++
++  /* ================================================================
++     style 2: liquid light
++     ================================================================ */
++
++  function LiquidStyle() {
++    var BW = preview ? 36 : 60, BH = Math.round(BW * 16 / 9);
++    var fc = document.createElement('canvas');
++    fc.width = BW; fc.height = BH;
++    var fx = fc.getContext('2d'), img = fx.createImageData(BW, BH), data = img.data;
++    var NB = 6, i, j;
++    var FA = window.Float32Array || Array;
++    var vig = new FA(BW * BH), us = new FA(BW), vs = new FA(BH);
++    for (j = 0; j < BH; j++) {
++      vs[j] = (j + 0.5) / BH;
++      for (i = 0; i < BW; i++) {
++        var u = (i + 0.5) / BW, v = vs[j];
++        var dd = (u - 0.5) * (u - 0.5) + (v - 0.42) * (v - 0.42) * 0.7;
++        var k = 1 - Math.min(0.55, dd * 1.25);
++        if (v > 0.55) { k *= 1 - 0.42 * Math.pow((v - 0.55) / 0.45, 1.6) * (1 - u * 0.5); }
++        vig[j * BW + i] = k;
++      }
++    }
++    for (i = 0; i < BW; i++) { us[i] = (i + 0.5) / BW; }
++    var rng = new Rng(4242), blobs = [];
++    for (i = 0; i < NB; i++) {
++      blobs.push({ fx: rng.rand(0.05, 0.13), fy: rng.rand(0.04, 0.11), px: rng.rand(0, TAU), py: rng.rand(0, TAU),
++        ax: rng.rand(0.3, 0.5), ay: rng.rand(0.3, 0.48), x: 0, y: 0 });
++    }
++    var oldCols = null, newCols = null, pourT = -99;
++    var cur = null, prev = null, tc = -99, clock = 0, speed = 1, bright = 1, Tn = 0;
++
++    function liquidCols(pal) {
++      var out = [], i, hs, c;
++      for (i = 0; i < NB; i++) {
++        c = pal.colors[i % pal.colors.length];
++        if (i === NB - 1) { c = pal.accent; }
++        hs = rgb2hsl(c);
++        out.push(hsl2rgb(hs[0], Math.min(1, hs[1] * 1.2 + 0.06), clamp(hs[2], 0.2, 0.6)));
++      }
++      return out;
++    }
++
++    function field(t, pour) {
++      var bx = [], by = [], b, k, ii, jj, p = 0, u, v, wu, wv, dx, dy, w, sw, r, g, bb, r2, g2, b2, mm, kk;
++      for (k = 0; k < NB; k++) {
++        b = blobs[k];
++        bx.push(0.5 + b.ax * Math.sin(t * b.fx * TAU * 0.35 + b.px));
++        by.push(0.5 + b.ay * Math.sin(t * b.fy * TAU * 0.35 + b.py));
++      }
++      var A = oldCols, B = newCols, dual = pour < 1, front = pour * 1.5 - 0.25;
++      var ar = [], ag = [], ab = [], br = [], bg = [], bbb = [];
++      for (k = 0; k < NB; k++) { ar.push(A[k][0]); ag.push(A[k][1]); ab.push(A[k][2]); br.push(B[k][0]); bg.push(B[k][1]); bbb.push(B[k][2]); }
++      var t1 = t * 0.6, t2 = t * 0.5, t3 = t * 1.3, br0 = bright;
++      for (jj = 0; jj < BH; jj++) {
++        v = vs[jj];
++        for (ii = 0; ii < BW; ii++) {
++          u = us[ii];
++          wu = u + 0.07 * Math.sin(v * 5.3 + t1);
++          wv = v + 0.05 * Math.sin(u * 6.1 - t2);
++          sw = 0; r = 0; g = 0; bb = 0; r2 = 0; g2 = 0; b2 = 0;
++          for (k = 0; k < NB; k++) {
++            dx = wu - bx[k]; dy = (wv - by[k]) * 0.75;
++            w = 1 / (dx * dx + dy * dy + 0.012); w = w * w;
++            sw += w;
++            r += w * ar[k]; g += w * ag[k]; bb += w * ab[k];
++            if (dual) { r2 += w * br[k]; g2 += w * bg[k]; b2 += w * bbb[k]; }
++          }
++          kk = vig[p >> 2] * br0 / sw;
++          if (dual) {
++            mm = (front - v + 0.07 * Math.sin(u * 9 + t3)) / 0.16;
++            mm = mm < 0 ? 0 : (mm > 1 ? 1 : mm);
++            r = r + (r2 - r) * mm; g = g + (g2 - g) * mm; bb = bb + (b2 - bb) * mm;
++          }
++          data[p] = r * kk; data[p + 1] = g * kk; data[p + 2] = bb * kk; data[p + 3] = 255;
++          p += 4;
++        }
++      }
++      fx.putImageData(img, 0, 0);
++    }
++
++    function build(sc) {
++      var v = { sc: sc, idle: sc.kind !== 'track' };
++      var white = [250, 247, 242];
++      if (v.idle) {
++        v.connect = sc.kind === 'connect' ? makeLabel(CONNECT_TEXT, '400', 14, 'rgba(235,238,245,0.62)', 0.6, 'rgba(0,0,0,0.4)') : null;
++        return v;
++      }
++      var tx = texts(sc), ink = mix(white, sc.pal.accent, 0.06), sh = 'rgba(0,0,0,0.35)', MXL = 40, TW = 460;
++      v.label = makeLabel(tx.label.toUpperCase(), '500', 13, css(ink, 0.82), 3, sh);
++      v.date = tx.showDate ? makeLabel(tx.date.toUpperCase(), '400', 12, css(ink, 0.7), 2.4, sh) : null;
++      var fh = fitWrap(tx.hero, '300', TW, 2, 96, 58);
++      if (wrap(tx.hero, '300', fh.s, TW).length > 2) { fh = fitWrap(tx.hero, '300', TW, 3, 62, 30); }
++      v.hero = makeText(fh.lines, '300', fh.s, css(ink), { lh: fh.s * 1.04, shadow: sh });
++      var f1 = fitWrap(tx.s1, '400', TW, 2, 25, 16);
++      v.s1 = makeText(f1.lines, '400', f1.s, css(ink, 0.9), { lh: f1.s * 1.2, shadow: sh });
++      var f2 = fitWrap(tx.s2, '400', TW, 2, 17, 13);
++      v.s2 = tx.s2 ? makeText(f2.lines, '400', f2.s, css(ink, 0.62), { lh: f2.s * 1.25, shadow: sh }) : null;
++      /* stack text upwards from the bottom anchor */
++      var y = 892;
++      if (v.s2) { y -= v.s2.th; v.s2y = y; y -= 14; }
++      y -= v.s1.th; v.s1y = y; y -= 22;
++      y -= v.hero.th; v.heroY = y; y -= 22;
++      y -= 14; v.labelY = y;
++      v.mx = MXL;
++      var top = 104, bottom = y - 48;
++      v.cs = Math.round(clamp(Math.min(360, bottom - top), 150, 360));
++      v.ccy = top + (bottom - top) / 2;
++      v.cover = makeCover(sc.art, v.cs);
++      v.cover.x.strokeStyle = 'rgba(255,255,255,0.25)';
++      v.cover.x.lineWidth = 1;
++      v.cover.x.strokeRect(0.5, 0.5, v.cs - 1, v.cs - 1);
++      var D = v.cs + 160;
++      v.shadow = mk(D, D);
++      var x = v.shadow.x;
++      x.shadowColor = 'rgba(0,0,0,0.6)';
++      x.shadowBlur = 42 * S;
++      x.shadowOffsetX = 3000 * S;
++      x.fillStyle = '#000';
++      x.fillRect(80 - 3000, 80, v.cs, v.cs);
++      v.ink = ink;
++      return v;
++    }
++
++    function drawCover(ctx, v, a, dy, sc) {
++      if (v.idle || a <= 0.01) { return; }
++      var tX = Math.sin(clock * 0.31) * 0.014, tY = Math.cos(clock * 0.23) * 0.012;
++      var b = (1 + Math.sin(clock * 0.5) * 0.012) * sc, fy = Math.sin(clock * 0.4) * 7 + dy;
++      var cx = W / 2, cy = v.ccy + fy, h = v.cs / 2;
++      ctx.globalAlpha = a * 0.9;
++      ctx.drawImage(v.shadow, cx - v.shadow.lw / 2 - tX * 700, cy - v.shadow.lh / 2 + 28 - tY * 500, v.shadow.lw, v.shadow.lh);
++      ctx.globalAlpha = a;
++      ctx.setTransform(S * b, S * tY, S * tX, S * b, S * cx, S * cy);
++      ctx.drawImage(v.cover, -h, -h, v.cs, v.cs);
++      var gx = Math.sin(clock * 0.27) * h;
++      var g = ctx.createLinearGradient(-h + gx, -h, h + gx, h);
++      g.addColorStop(0, 'rgba(255,255,255,0.16)');
++      g.addColorStop(0.45, 'rgba(255,255,255,0)');
++      g.addColorStop(1, 'rgba(0,0,0,0.18)');
++      ctx.fillStyle = g;
++      ctx.fillRect(-h, -h, v.cs, v.cs);
++      ctx.setTransform(S, 0, 0, S, 0, 0);
++      ctx.globalAlpha = 1;
++    }
++
++    function drawTexts(ctx, v, p, out) {
++      var a, dx, items, k, it;
++      if (v.idle) {
++        if (v.connect) { ctx.globalAlpha = out ? 1 - p : p; blit(ctx, v.connect, (W - v.connect.lw) / 2, H - 82); ctx.globalAlpha = 1; }
++        return;
++      }
++      items = [[v.label, v.labelY], [v.hero, v.heroY], [v.s1, v.s1y], [v.s2, v.s2y]];
++      for (k = 0; k < items.length; k++) {
++        it = items[k];
++        if (!it[0]) { continue; }
++        if (out) { a = 1 - clamp01(p * 2.5 - k * 0.15); dx = 0; } else {
++          var q = clamp01((p - k * 0.08) / 0.6);
++          a = q; dx = -(1 - easeOutCubic(q)) * 40;
++        }
++        if (a <= 0.01) { continue; }
++        ctx.globalAlpha = a;
++        blit(ctx, it[0], v.mx - it[0].pad + dx, it[1] - it[0].pad);
++      }
++      if (v.date) {
++        ctx.globalAlpha = out ? 1 - clamp01(p * 2.5) : clamp01(p / 0.6);
++        blit(ctx, v.date, W - 40 - v.date.tw - v.date.pad, 44 - v.date.pad);
++      }
++      ctx.globalAlpha = 1;
++      var pr = progressOf(v.sc);
++      if (pr && !out && p > 0.6) {
++        var pa = clamp01((p - 0.6) / 0.4);
++        ctx.fillStyle = css(v.ink, 0.2 * pa);
++        ctx.fillRect(40, 916, W - 80, 1);
++        ctx.fillStyle = css(v.ink, 0.85 * pa);
++        ctx.fillRect(40, 915.5, (W - 80) * pr.p, 2);
++        ctx.beginPath(); ctx.arc(40 + (W - 80) * pr.p, 916.5, 3.5, 0, TAU); ctx.fill();
++      }
++    }
++
++    return {
++      setScene: function (sc, old) {
++        var cols = sc.kind === 'track' ? liquidCols(sc.pal) : IDLE_PAL.colors;
++        if (!newCols) { oldCols = cols; newCols = cols; pourT = -99; } else {
++          oldCols = newCols; newCols = cols; pourT = Tn;
++        }
++        prev = cur;
++        cur = build(sc);
++        tc = prev ? Tn : Tn - 10;
++        if (!prev) { tc = Tn - 0.01; }
++      },
++      refresh: function () { if (cur) { cur = build(cur.sc); } },
++      frame: function (ctx, T, dt) {
++        Tn = T;
++        if (!cur) { return; }
++        var playing = !cur.idle && cur.sc.mode === 'playing';
++        speed += ((playing ? 1 : (cur.idle ? 0.5 : 0.32)) - speed) * Math.min(1, dt * 0.03);
++        bright += ((playing ? 1 : (cur.idle ? 0.7 : 0.72)) - bright) * Math.min(1, dt * 0.03);
++        clock += dt / 60 * speed;
++        var pour = clamp01((T - pourT) / 3.4);
++        if (pour >= 1 && oldCols !== newCols) { oldCols = newCols; }
++        field(clock * 1.0 + 20, easeInOut(pour));
++        ctx.drawImage(fc, 0, 0, W, H);
++        var p = clamp01((T - tc) / 2.6);
++        if (prev) {
++          if (p >= 1) { prev = null; } else {
++            var po = clamp01(p / 0.45);
++            drawCover(ctx, prev, 1 - smooth(po), easeInCubic(po) * 26, 1 - 0.05 * po);
++            drawTexts(ctx, prev, p, true);
++          }
++        }
++        var ci = clamp01((p - (prev ? 0.35 : 0)) / 0.55);
++        drawCover(ctx, cur, smooth(ci), (1 - easeOutCubic(ci)) * -34, 0.97 + 0.03 * easeOutCubic(ci));
++        drawTexts(ctx, cur, prev ? clamp01((p - 0.4) / 0.6) : p, false);
++      }
++    };
++  }
++
++  /* ================================================================
++     boot
++     ================================================================ */
++
++  var canvas = document.getElementById('music');
++  canvas.width = Math.round(W * S);
++  canvas.height = Math.round(H * S);
++  var ctx = canvas.getContext('2d');
++
++  function fit() {
++    var vw = window.innerWidth || document.documentElement.clientWidth;
++    var vh = window.innerHeight || document.documentElement.clientHeight;
++    var k = Math.max(vw / W, vh / H), w = Math.ceil(W * k), h = Math.ceil(H * k);
++    canvas.style.width = w + 'px';
++    canvas.style.height = h + 'px';
++    canvas.style.left = Math.floor((vw - w) / 2) + 'px';
++    canvas.style.top = Math.floor((vh - h) / 2) + 'px';
++  }
++  fit();
++  window.addEventListener('resize', fit, false);
++
++  style = styleId === 'liquid' ? LiquidStyle() : KineticStyle();
++  window.MUSIC_CURRENT = { style: styleId, lead: lead };
++  var stats = window.MUSIC_STATS = { style: styleId, frames: 0, totalMs: 0, maxMs: 0, avgMs: 0 };
++
++  wantScene({ key: 'idle:empty', kind: 'empty', mode: 'idle' });
++
++  if (isDemo) {
++    applyState(demoState());
++    setInterval(function () { applyState(demoState()); }, 5000);
++  } else {
++    poll();
++    setInterval(poll, 5000);
++  }
++
++  var textSig = '';
++  setInterval(function () {
++    if (!curScene || curScene.kind !== 'track') { return; }
++    var sig = sceneLabel(curScene) + '|' + dateStr();
++    if (textSig && sig !== textSig) { style.refresh(); }
++    textSig = sig;
++  }, 20000);
++
++  var raf = window.requestAnimationFrame || window.webkitRequestAnimationFrame ||
++    function (cb) { return window.setTimeout(function () { cb(now()); }, 33); };
++  var startT = null, lastT = 0, FRAME_MS = preview ? 1000 / 20 - 2 : 1000 / 30 - 2;
++
++  function tick() {
++    raf(tick);
++    var tnow = now();
++    if (startT === null) { startT = tnow; lastT = tnow - 1000 / 30; }
++    if (tnow - lastT < FRAME_MS) { return; }
++    var dt = Math.min(4, (tnow - lastT) / (1000 / 60));
++    lastT = tnow;
++    var t0 = now();
++    ctx.setTransform(S, 0, 0, S, 0, 0);
++    ctx.globalAlpha = 1;
++    style.frame(ctx, (tnow - startT) / 1000, dt);
++    var ms = now() - t0;
++    stats.frames++;
++    stats.totalMs += ms;
++    stats.avgMs = stats.totalMs / stats.frames;
++    if (ms > stats.maxMs) { stats.maxMs = ms; }
++  }
++  tick();
++})();
++</script>
++</body>
++</html>
+diff --git a/app/src/test/java/com/aphex3k/eo1/GeneratedFilesJanitorTest.java b/app/src/test/java/com/aphex3k/eo1/GeneratedFilesJanitorTest.java
+new file mode 100644
+index 0000000..237a8ec
+--- /dev/null
++++ b/app/src/test/java/com/aphex3k/eo1/GeneratedFilesJanitorTest.java
+@@ -0,0 +1,103 @@
++package com.aphex3k.eo1;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertTrue;
++
++import org.junit.Before;
++import org.junit.Rule;
++import org.junit.Test;
++import org.junit.rules.TemporaryFolder;
++
++import java.io.File;
++import java.io.FileOutputStream;
++import java.io.IOException;
++
++public class GeneratedFilesJanitorTest {
++
++    @Rule
++    public TemporaryFolder tmp = new TemporaryFolder();
++    private File files;
++    private File up;
++
++    @Before
++    public void setUp() {
++        files = tmp.getRoot();
++        up = new File(files, UploadedMedia.DIR_NAME);
++        assertTrue(up.mkdirs());
++    }
++
++    private File make(File dir, String name, long ageMs) throws IOException {
++        File f = new File(dir, name);
++        FileOutputStream o = new FileOutputStream(f);
++        o.write(new byte[]{1, 2, 3});
++        o.close();
++        assertTrue(f.setLastModified(System.currentTimeMillis() - ageMs));
++        return f;
++    }
++
++    @Test
++    public void keepsOnlyNewestOfEachGeneratedKind() throws IOException {
++        File oldNyt = make(up, "nyt-frontpage-2026-11-19-gif.gif", 3 * 86400000L);
++        File oldNytNote = make(up, "nyt-frontpage-2026-11-19-gif.gif.incompat.txt", 3 * 86400000L);
++        File midNyt = make(up, "nyt-frontpage-2026-11-20-clean.jpg", 2 * 86400000L);
++        File newNyt = make(up, "nyt-frontpage-2026-11-21-gif.gif", 1000);
++        File oldGrid = make(up, "spotify-grid-2026-11-20-12.jpg", 86400000L);
++        File newGrid = make(up, "spotify-grid-2026-11-21-20.gif", 1000);
++        File poster = make(up, "spotify-nowplaying-abc.jpg", 5000);
++        File photo = make(up, "IMG_1.jpg", 9 * 86400000L);
++        File kept = make(up, "art-blocks-1.jpg", 9 * 86400000L);
++
++        assertEquals(4, GeneratedFilesJanitor.run(files));
++        assertFalse(oldNyt.exists());
++        assertFalse(oldNytNote.exists());
++        assertFalse(midNyt.exists());
++        assertTrue(newNyt.exists());
++        assertFalse(oldGrid.exists());
++        assertTrue(newGrid.exists());
++        assertTrue(poster.exists());
++        assertTrue(photo.exists());   // the user's photos are never touched
++        assertTrue(kept.exists());    // nor kept art
++        assertEquals(0, GeneratedFilesJanitor.run(files));   // idempotent
++    }
++
++    @Test
++    public void removesOrphansAndStaleTemp() throws IOException {
++        File orphanNote = make(up, "gone.jpg.incompat.txt", 1000);
++        File photo = make(up, "IMG_2.jpg", 1000);
++        File note = make(up, "IMG_2.jpg.incompat.txt", 1000);
++        File staleTemp = new File(up, "incoming_123");
++        assertTrue(staleTemp.mkdirs());
++        make(staleTemp, "part0", 1000);
++        assertTrue(staleTemp.setLastModified(System.currentTimeMillis() - 2 * 3600000L));
++        File liveTemp = new File(up, "incoming_456");
++        assertTrue(liveTemp.mkdirs());
++
++        File thumbs = new File(files, "thumbs");
++        assertTrue(thumbs.mkdirs());
++        File liveThumb = make(thumbs, WebServer.thumbKey("IMG_2.jpg") + "_abc.jpg", 1000);
++        File deadThumb = make(thumbs, WebServer.thumbKey("deleted.jpg") + "_abc.jpg", 1000);
++
++        GeneratedFilesJanitor.run(files);
++        assertFalse(orphanNote.exists());
++        assertTrue(photo.exists());
++        assertTrue(note.exists());
++        assertFalse(staleTemp.exists());
++        assertTrue(liveTemp.exists());
++        assertTrue(liveThumb.exists());
++        assertFalse(deadThumb.exists());
++    }
++
++    @Test
++    public void trimsTheArtCache() throws IOException {
++        File cache = new File(files, "music-cache");
++        assertTrue(cache.mkdirs());
++        for (int i = 0; i < 75; i++) {
++            make(cache, "a" + i + ".jpg", i * 1000L);
++        }
++        GeneratedFilesJanitor.run(files);
++        assertEquals(60, cache.list().length);
++        assertTrue(new File(cache, "a0.jpg").exists());     // newest kept
++        assertFalse(new File(cache, "a74.jpg").exists());   // oldest gone
++    }
++}
+diff --git a/app/src/test/java/com/aphex3k/eo1/MusicServiceTest.java b/app/src/test/java/com/aphex3k/eo1/MusicServiceTest.java
+new file mode 100644
+index 0000000..72b7665
+--- /dev/null
++++ b/app/src/test/java/com/aphex3k/eo1/MusicServiceTest.java
+@@ -0,0 +1,33 @@
++package com.aphex3k.eo1;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertTrue;
++
++import org.junit.Test;
++
++import java.io.File;
++
++public class MusicServiceTest {
++
++    @Test
++    public void parsesSpotifyTimestamps() {
++        assertEquals(1732250000123L, MusicService.parseIso("2024-11-22T04:33:20.123Z"));
++        assertEquals(1732250000000L, MusicService.parseIso("2024-11-22T04:33:20Z"));
++        assertEquals(0L, MusicService.parseIso("nonsense"));
++        assertEquals(0L, MusicService.parseIso(null));
++    }
++
++    @Test
++    public void onlyProxiesSpotifyArtAndStartsDisconnected() throws Exception {
++        File dir = java.nio.file.Files.createTempDirectory("music").toFile();
++        MusicService m = MusicService.get(dir);
++        assertFalse(m.isConnected());
++        assertFalse(m.isPlaying());
++        assertTrue(m.stateJson().contains("\"connected\":false"));
++        assertNull(m.image("http://evil.example/x.jpg"));
++        assertNull(m.image("https://i.scdn.co/image/../../etc/passwd"));
++        assertNull(m.image(null));
++    }
++}
 diff --git a/app/src/test/java/com/aphex3k/eo1/WallSourcesTest.java b/app/src/test/java/com/aphex3k/eo1/WallSourcesTest.java
 new file mode 100644
 index 0000000..010de4a
