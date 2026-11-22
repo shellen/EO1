@@ -1,5 +1,38 @@
+diff --git a/app/src/main/java/com/aphex3k/eo1/BrightnessManager.java b/app/src/main/java/com/aphex3k/eo1/BrightnessManager.java
+index ca8ed02..19fbb6c 100644
+--- a/app/src/main/java/com/aphex3k/eo1/BrightnessManager.java
++++ b/app/src/main/java/com/aphex3k/eo1/BrightnessManager.java
+@@ -334,6 +334,28 @@ public class BrightnessManager {
+      * @return true when the new level was written down. A {@code false} means the panel changed and
+      *         the next boot will not remember it, which the caller has to say out loud.
+      */
++    /**
++     * Sets the level directly (the phone page's slider), clamped to the valid range. Same
++     * bookkeeping as {@link #raiseMinimumBrightnessStep}.
++     */
++    public boolean setMinimumBrightnessStep(int step, String via) {
++        final int base = steppedBase();
++        this.minimumBrightnessStep = step < MIN_STEP ? MIN_STEP : (step > MAX_STEP ? MAX_STEP : step);
++        this.minBrightness = floorBrightness(this.minimumBrightnessStep);
++        boolean durable = store != null && store.setMinimumBrightnessStep(this.minimumBrightnessStep);
++        this.stepAuthoritative = true;
++        this.changedFromStep = base;
++        this.changedToStep = this.minimumBrightnessStep;
++        this.changedVia = via;
++        this.changedAtMs = System.currentTimeMillis();
++        this.changedDurably = durable;
++        this.stepSource = via;
++        report("brightness step", this.changedFromStep + " -> " + this.changedToStep + " via " + via
++                + (durable ? "" : " (NOT PERSISTED)"));
++        notifyBrightnessChanged();
++        return durable;
++    }
++
+     public boolean raiseMinimumBrightnessStep(String via) {
+         final int base = steppedBase();
+         this.minimumBrightnessStep = base >= MAX_STEP ? MIN_STEP : base + 1;
 diff --git a/app/src/main/java/com/aphex3k/eo1/MainActivity.java b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
-index b12c5a6..fac4178 100644
+index b12c5a6..8f23384 100644
 --- a/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 +++ b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 @@ -6249,10 +6249,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
@@ -18,11 +51,39 @@ index b12c5a6..fac4178 100644
                  if (!mediaManager.queueAssetDisplay(assetKey)) {
                      return false;
                  }
+@@ -6270,9 +6273,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+             case "screen":
+                 task = this::toggleScreenOn;
+                 break;
+-            case "brightness":
+-                task = () -> adjustMinimumBrightness("web");
++            case "brightness": {
++                String stepParam = params != null ? params.get("step") : null;
++                if (stepParam != null) {
++                    final int step;
++                    try {
++                        step = Integer.parseInt(stepParam.trim());
++                    } catch (NumberFormatException e) {
++                        return false;
++                    }
++                    task = () -> {
++                        this.brightnessManager.setShouldTheScreenBeOn(true);
++                        turnScreenOn();
++                        this.brightnessManager.setMinimumBrightnessStep(step, "web");
++                    };
++                } else {
++                    task = () -> adjustMinimumBrightness("web");
++                }
+                 break;
++            }
+             case "config":
+                 task = this::showConfigurationUI;
+                 break;
 diff --git a/app/src/main/java/com/aphex3k/eo1/WebServer.java b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-index f6cbeb4..2a3dda7 100644
+index f6cbeb4..6da7090 100644
 --- a/app/src/main/java/com/aphex3k/eo1/WebServer.java
 +++ b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-@@ -259,6 +259,15 @@ public class WebServer {
+@@ -259,6 +259,18 @@ public class WebServer {
          if (path.equals("/") || path.equals("/index.html")) {
              return "index";
          }
@@ -32,13 +93,16 @@ index f6cbeb4..2a3dda7 100644
 +        if (path.equals("/icon.png")) {
 +            return "icon";
 +        }
++        if (path.startsWith("/thumb/")) {
++            return "thumb";
++        }
 +        if (path.equals("/settings")) {
 +            return "simpleSettings";
 +        }
          if (path.equals("/state")) {
              return "state";
          }
-@@ -522,6 +531,15 @@ public class WebServer {
+@@ -522,6 +534,15 @@ public class WebServer {
  
          switch (routeKey) {
              case "index":
@@ -54,10 +118,30 @@ index f6cbeb4..2a3dda7 100644
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
                      return;
-@@ -529,6 +547,31 @@ public class WebServer {
+@@ -529,6 +550,51 @@ public class WebServer {
                  send(os, 200, "text/html; charset=utf-8", renderIndex());
                  break;
  
++            case "thumb": {
++                if (!method.equals("GET")) {
++                    send(os, 405, "text/plain", "method not allowed");
++                    return;
++                }
++                String tname = urlDecode(segmentAfter(path, "/thumb/", null));
++                File src = controller.uploadedFile(tname);
++                if (src == null || !src.isFile()) {
++                    send(os, 404, "text/plain", "not found");
++                    return;
++                }
++                File thumb = thumbnailFor(src);
++                if (thumb == null) {
++                    streamFile(os, src, contentTypeFor(src.getName()));   // undecodable here: send the original
++                } else {
++                    streamFile(os, thumb, "image/jpeg");
++                }
++                break;
++            }
++
 +            case "simpleSettings": {
 +                if (!method.equals("POST")) {
 +                    send(os, 405, "text/plain", "method not allowed");
@@ -86,7 +170,15 @@ index f6cbeb4..2a3dda7 100644
              case "state":
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
-@@ -1031,6 +1074,98 @@ public class WebServer {
+@@ -591,6 +657,7 @@ public class WebServer {
+                 }
+                 String name = urlDecode(decodePathSegment(path, "/delete"));
+                 boolean ok = controller.deleteUploadedFile(name);
++                deleteThumbnails(name);
+                 sendJson(os, ok ? 200 : 404, ok ? okJson("deleted") : errorJson("not found"));
+                 break;
+             }
+@@ -1031,6 +1098,115 @@ public class WebServer {
       * {@code POST /config/import}). The body is read off the socket with a hard cap before the
       * controller touches it.
       */
@@ -160,6 +252,23 @@ index f6cbeb4..2a3dda7 100644
 +            cfg.addProperty("startQuietHour", -1);
 +            cfg.addProperty("endQuietHour", -1);
 +        }
++        if (req.has("name")) {
++            String saved;
++            try {
++                saved = controller.setDeviceName(req.get("name").getAsString());
++            } catch (Exception e) {
++                sendJson(os, 400, errorJson("could not save the name"));
++                return;
++            }
++            if (req.size() == 1) {   // name only: no configuration rewrite needed
++                JsonObject o = new JsonObject();
++                o.addProperty("ok", true);
++                o.addProperty("msg", "name saved");
++                o.addProperty("name", saved == null ? "" : saved);
++                sendJson(os, 200, o);
++                return;
++            }
++        }
 +        if (req.has("timeZone")) {
 +            String tz = req.get("timeZone").getAsString();
 +            if (!java.util.Arrays.asList(java.util.TimeZone.getAvailableIDs()).contains(tz)) {
@@ -185,10 +294,93 @@ index f6cbeb4..2a3dda7 100644
      private void handleConfigPost(Map<String, String> headers, InputStream is, OutputStream os)
              throws IOException {
          long declared = parseLongLenient(headers.get("content-length"));
-@@ -1208,6 +1343,46 @@ public class WebServer {
+@@ -1208,6 +1384,129 @@ public class WebServer {
  
      // --- rendering ---
  
++    // --- thumbnails for the phone page's gallery: ~270x480 JPEGs, cached beside the uploads ---
++
++    private File thumbDir() {
++        File parent = controller.uploadedDir().getParentFile();
++        return new File(parent, "thumbs");
++    }
++
++    private static String thumbKey(String name) {
++        return Integer.toHexString(name.hashCode()) + "_" + Integer.toHexString(name.length());
++    }
++
++    /** A cached small JPEG for an uploaded still, or null when it cannot be made (videos, odd files). */
++    private File thumbnailFor(File src) {
++        String n = src.getName().toLowerCase(Locale.US);
++        if (!(n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png") || n.endsWith(".gif")
++                || n.endsWith(".webp") || n.endsWith(".bmp"))) {
++            return null;
++        }
++        File dir = thumbDir();
++        File out = new File(dir, thumbKey(src.getName()) + "_" + Long.toHexString(src.lastModified()) + ".jpg");
++        if (out.isFile() && out.length() > 0) {
++            return out;
++        }
++        synchronized (WebServer.class) {
++            if (out.isFile() && out.length() > 0) {
++                return out;
++            }
++            if (!dir.isDirectory() && !dir.mkdirs()) {
++                return null;
++            }
++            android.graphics.Bitmap bmp = null;
++            try {
++                android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
++                o.inJustDecodeBounds = true;
++                android.graphics.BitmapFactory.decodeFile(src.getAbsolutePath(), o);
++                if (o.outWidth <= 0 || o.outHeight <= 0) {
++                    return null;
++                }
++                int sample = 1;
++                while (o.outWidth / (sample * 2) >= 270 && o.outHeight / (sample * 2) >= 270) {
++                    sample *= 2;
++                }
++                o = new android.graphics.BitmapFactory.Options();
++                o.inSampleSize = sample;
++                o.inPreferredConfig = android.graphics.Bitmap.Config.RGB_565;
++                bmp = android.graphics.BitmapFactory.decodeFile(src.getAbsolutePath(), o);
++                if (bmp == null) {
++                    return null;
++                }
++                File tmp = new File(dir, out.getName() + ".tmp");
++                java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp);
++                try {
++                    bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, fos);
++                } finally {
++                    fos.close();
++                }
++                deleteThumbnails(src.getName());          // drop thumbnails of older versions
++                return tmp.renameTo(out) ? out : null;
++            } catch (Throwable t) {
++                Log.w(TAG, "thumbnail failed for " + src.getName() + ": " + t);
++                return null;
++            } finally {
++                if (bmp != null) {
++                    bmp.recycle();
++                }
++            }
++        }
++    }
++
++    private void deleteThumbnails(String name) {
++        File[] list = thumbDir().listFiles();
++        if (list == null) {
++            return;
++        }
++        String prefix = thumbKey(name) + "_";
++        for (File f : list) {
++            if (f.getName().startsWith(prefix)) {
++                //noinspection ResultOfMethodCallIgnored
++                f.delete();
++            }
++        }
++    }
++
 +    private static volatile String sMobilePage;
 +
 +    /** The phone-first landing page, bundled as a classpath resource; null if it is missing. */
@@ -232,7 +424,7 @@ index f6cbeb4..2a3dda7 100644
      private String renderIndex() {
          File dir = controller.uploadedDir();
          UploadedMedia.FileInfo[] files = controller.listUploadedFiles();
-@@ -1232,6 +1407,7 @@ public class WebServer {
+@@ -1232,6 +1531,7 @@ public class WebServer {
              sb.append("<p><small>").append(escapeHtml(termsNotice)).append("</small></p>");
          }
          sb.append("<p>").append(escapeHtml(controller.appBuildSummary())).append("</p>");
@@ -240,7 +432,7 @@ index f6cbeb4..2a3dda7 100644
          sb.append("<p><a href=\"/state\">state</a> · <a href=\"/logs\">logs</a> · ")
                  .append("<a href=\"/crashes\">crashes</a> · ")
                  .append("<a href=\"/reports\">reports</a> · ")
-@@ -2156,6 +2332,7 @@ public class WebServer {
+@@ -2156,6 +2456,7 @@ public class WebServer {
              o.addProperty("name", f.name);
              o.addProperty("size", f.size);
              o.addProperty("lastModified", f.lastModified);
@@ -625,10 +817,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..1ce70e9
+index 0000000..081fd04
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,767 @@
+@@ -0,0 +1,868 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -650,7 +842,7 @@ index 0000000..1ce70e9
 +}
 +@media (prefers-color-scheme:dark){:root{
 +  --bg:#111110;--card:#1c1b1a;--ink:#f2efe9;--muted:#a19b92;--line:#2c2a27;
-+  --accent:#f2efe9;--accent-ink:#111110;--good:#6cc08b;--warn:#e3a35d;--bad:#ff8a80;
++  --accent:#f2efe9;--accent-ink:#111110;--good:#6cc08b;--warn:#e3a35d;--bad:#d9433a;
 +  --shadow:none;
 +}}
 +*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -659,16 +851,35 @@ index 0000000..1ce70e9
 +body{font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 +  padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 24px);
 +  max-width:640px;margin:0 auto}
-+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 14px}
-+h1{font-size:28px;letter-spacing:-.02em;margin:0}
-+.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px;margin-top:2px}
-+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
++header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:2px 0 12px}
++h1{font-size:26px;letter-spacing:-.02em;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.hinfo{text-align:right;font-size:13px;color:var(--muted);line-height:1.35;flex:none}
++.hinfo>div:first-child{color:var(--ink);font-weight:600;display:flex;align-items:center;justify-content:flex-end;gap:6px}
++.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none;display:inline-block}
 +.dot.on{background:var(--good)}.dot.sleep{background:var(--warn)}.dot.off{background:var(--bad)}
 +.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid var(--line)}
-+.now{display:flex;gap:14px;padding:12px;align-items:center;margin-bottom:12px}
-+.now .thumb{width:54px;aspect-ratio:9/16;border-radius:8px;background:var(--line) center/cover no-repeat;flex:none}
-+.now .label{font-size:13px;color:var(--muted)}
-+.now .name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.nowcard{padding:10px 12px;margin-bottom:10px}
++.nowtop{display:flex;gap:12px;align-items:center}
++.nowtop .thumb{width:36px;aspect-ratio:9/16;border-radius:6px;background:var(--line) center/cover no-repeat;flex:none}
++.nowtext{min-width:0;flex:1}
++.nowtext .label{font-size:12px;color:var(--muted)}
++.nowtext .name{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.iconbtn{width:42px;height:42px;border-radius:50%;background:var(--bg);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex:none}
++.iconbtn svg{width:20px;height:20px}
++.iconbtn:active{transform:scale(.94)}
++.iconbtn.off{background:var(--ink);color:var(--bg);border-color:var(--ink)}
++.bright{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);color:var(--muted)}
++.bright svg{width:18px;height:18px;flex:none}
++.bright span{font-size:13px;min-width:28px;text-align:right;font-variant-numeric:tabular-nums}
++input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:28px;background:transparent;margin:0}
++input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(to right,var(--ink) var(--pct,50%),var(--line) var(--pct,50%))}
++input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--line)}
++input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--card);border:1px solid var(--line);box-shadow:0 1px 4px rgba(0,0,0,.25);margin-top:-9px}
++input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:var(--card);border:1px solid var(--line)}
++.addrow{display:flex;gap:8px;align-items:stretch;margin-bottom:18px}
++.addrow .primary{flex:1;width:auto}
++.addrow .seg{align-items:stretch}
++.addrow .seg button{padding:0 12px}
 +.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
 +button{font:inherit;color:inherit;border:0;cursor:pointer}
 +.ctl{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 6px;
@@ -676,30 +887,32 @@ index 0000000..1ce70e9
 +.ctl svg{width:22px;height:22px}
 +.ctl:active,.primary:active{transform:scale(.97)}
 +.ctl small{font-weight:400;color:var(--muted);font-size:11px}
-+.primary{width:100%;background:var(--accent);color:var(--accent-ink);border-radius:14px;padding:16px;
-+  font-weight:700;font-size:17px;display:flex;align-items:center;justify-content:center;gap:10px}
-+.primary svg{width:22px;height:22px}
++.primary{width:100%;background:var(--accent);color:var(--accent-ink);border-radius:12px;padding:12px;
++  font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;gap:10px}
++.primary svg{width:18px;height:18px}
 +.fitrow{display:flex;justify-content:center;gap:6px;margin:10px 0 18px;font-size:14px}
 +.seg{display:inline-flex;background:var(--line);border-radius:10px;padding:3px}
 +.seg button{background:none;padding:6px 12px;border-radius:8px;font-size:13px;color:var(--muted)}
 +.seg button.sel{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
-+.sectionhead{display:flex;justify-content:space-between;align-items:baseline;margin:6px 2px 10px}
-+h2{font-size:18px;margin:0}
++.sectionhead{display:flex;justify-content:space-between;align-items:baseline;margin:22px 2px 8px}
++.sectionhead:first-of-type{margin-top:0}
++h2{font-size:17px;margin:0}
 +.count{color:var(--muted);font-size:14px}
-+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-+.tile{position:relative;aspect-ratio:9/16;border-radius:10px;overflow:hidden;background:var(--line);padding:0}
++.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
++@media (min-width:560px){.grid{grid-template-columns:repeat(5,1fr)}}
++.tile{position:relative;aspect-ratio:9/16;border-radius:8px;overflow:hidden;background:var(--line);padding:0}
 +.tile img{width:100%;height:100%;object-fit:cover;display:block}
-+.tile .badge{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;
-+  font-weight:700;padding:2px 7px;border-radius:999px}
++.tile .badge{position:absolute;left:4px;top:4px;background:rgba(0,0,0,.65);color:#fff;font-size:10px;
++  font-weight:700;padding:2px 6px;border-radius:999px}
 +.tile .badge.warn{background:var(--warn)}
-+.tile .badge.gif{left:auto;right:6px;top:auto;bottom:6px}
++.tile .badge.gif{left:auto;right:4px;top:auto;bottom:4px}
 +.tile .vid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;font-weight:600;flex-direction:column;gap:6px}
 +.tile .vid svg{width:28px;height:28px}
 +.tile.pending{opacity:.55}
 +.tile .bar{position:absolute;left:0;bottom:0;height:4px;background:var(--good);transition:width .2s}
 +.empty{padding:28px 16px;text-align:center;color:var(--muted)}
 +.empty b{display:block;color:var(--ink);font-size:17px;margin-bottom:4px}
-+footer{margin-top:28px;text-align:center;font-size:13px;color:var(--muted)}
++footer{margin-top:20px;text-align:center;font-size:13px;color:var(--muted)}
 +footer a{color:var(--muted)}
 +.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:10}
 +.sheet{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--card);
@@ -726,15 +939,16 @@ index 0000000..1ce70e9
 +.switch span:before{content:"";position:absolute;width:27px;height:27px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 +.switch input:checked+span{background:var(--good)}
 +.switch input:checked+span:before{transform:translateX(20px)}
-+.hours{display:flex;gap:10px;align-items:center;margin-top:10px;font-size:15px;flex-wrap:wrap}
++.hours{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:15px;color:var(--muted)}
++.hours select{flex:1}
 +.hours select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
 +.linkbtn{background:none;color:var(--ink);text-decoration:underline;padding:0;font-size:14px}
 +.selbtn{background:none;font-size:15px;font-weight:600;color:var(--ink);padding:4px 2px}
-+.tile .check{position:absolute;right:6px;top:6px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;
++.tile .check{position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;border:2px solid #fff;
 +  background:rgba(0,0,0,.25);display:none;box-shadow:0 1px 3px rgba(0,0,0,.4)}
 +.selecting .tile .check{display:block}
 +.tile.picked .check{background:var(--good);border-color:var(--good)}
-+.tile.picked .check:after{content:"";position:absolute;left:7px;top:3px;width:6px;height:11px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
++.tile.picked .check:after{content:"";position:absolute;left:6px;top:2px;width:6px;height:11px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
 +.tile.picked img{opacity:.75}
 +.selbar{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--card);border-top:1px solid var(--line);
 +  padding:12px 16px calc(env(safe-area-inset-bottom) + 12px);display:none;gap:8px;grid-template-columns:1fr 1fr;z-index:9}
@@ -749,9 +963,16 @@ index 0000000..1ce70e9
 +.extras .seg button{flex:1}
 +.extras .primary{padding:13px;font-size:16px}
 +.extras .primary[disabled]{opacity:.6}
-+.extras .progress{font-size:13px;color:var(--muted);margin-top:8px;min-height:18px}
-+.extras label.auto{display:flex;gap:10px;align-items:center;font-size:14px;margin-top:12px}
-+.extras label.auto input{width:20px;height:20px}
++.extras .progress{font-size:13px;color:var(--muted);margin-top:8px}
++.extras .progress:empty{display:none}
++.extras .autorow{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;margin-top:12px}
++.settings{margin-top:0}
++.namerow{display:flex;gap:8px}
++.namerow input{flex:1;min-width:0;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
++.btn.small{padding:9px 14px}
++.info{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:14px}
++.info dt{color:var(--muted)}.info dd{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.ctitle{font-weight:600;font-size:17px;text-align:center;margin:6px 0 16px}
 +.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translate(-50%,-40px);
 +  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;
 +  transition:all .25s;z-index:20;max-width:90vw;text-align:center}
@@ -761,54 +982,55 @@ index 0000000..1ce70e9
 +</head>
 +<body>
 +<header>
-+  <div>
-+    <h1 id="title">Frame</h1>
-+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Connecting…</span></div>
++  <h1 id="title">Frame</h1>
++  <div class="hinfo">
++    <div><span class="dot" id="dot"></span><span id="statusText">Connecting…</span></div>
++    <div id="sched"></div>
 +  </div>
 +</header>
 +
 +<div class="offline" id="offline">Can’t reach the frame. Make sure your phone is on the same Wi-Fi.</div>
 +
-+<div class="card now" id="now" hidden>
-+  <div class="thumb" id="nowThumb"></div>
-+  <div style="min-width:0">
-+    <div class="label">On the frame now</div>
-+    <div class="name" id="nowName">—</div>
++<div class="card nowcard">
++  <div class="nowtop">
++    <div class="thumb" id="nowThumb"></div>
++    <div class="nowtext">
++      <div class="label">On the frame now</div>
++      <div class="name" id="nowName">—</div>
++    </div>
++    <button class="iconbtn" id="btnNext" aria-label="Next picture">
++      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/></svg>
++    </button>
++    <button class="iconbtn" id="btnScreen" aria-label="Turn the screen off">
++      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>
++    </button>
++  </div>
++  <div class="bright" id="brightRow">
++    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 5v1M12 18v1M5 12h1M18 12h1"/></svg>
++    <input type="range" id="bright" min="1" max="8" step="1" value="5" aria-label="Brightness">
++    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
++    <span id="brightLabel"></span>
 +  </div>
 +</div>
 +
-+<div class="controls">
-+  <button class="ctl" id="btnNext" aria-label="Next picture">
-+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/></svg>
-+    Next
++<div class="addrow">
++  <button class="primary" id="btnAdd">
++    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
++    Add photos
 +  </button>
-+  <button class="ctl" id="btnScreen" aria-label="Screen on or off">
-+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>
-+    <span id="screenLabel">Screen</span>
-+  </button>
-+  <button class="ctl" id="btnBright" aria-label="Brightness">
-+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-+    Brightness <small id="brightLabel"></small>
-+  </button>
++  <div class="seg" role="group" aria-label="How photos fit the frame">
++    <button id="fitFill" class="sel">Fill</button>
++    <button id="fitWhole">Whole</button>
++  </div>
 +</div>
-+
-+<button class="primary" id="btnAdd">
-+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-+  Add photos
-+</button>
 +<input type="file" id="picker" accept="image/*,video/*" multiple hidden>
 +
-+<div class="fitrow">
-+  <div class="seg" role="group" aria-label="How photos fit the frame">
-+    <button id="fitFill" class="sel">Fill frame</button>
-+    <button id="fitWhole">Show whole photo</button>
-+  </div>
-+</div>
 +
 +<div class="sectionhead"><h2>On rotation <span class="count" id="count"></span></h2><button class="selbtn" id="btnSelect" hidden>Select</button></div>
 +<div class="grid" id="grid"></div>
 +<div class="card empty" id="empty" hidden><b>No photos yet</b>Tap “Add photos” to put your first picture on the wall.</div>
 +
++<div class="sectionhead"><h2>Settings</h2></div>
 +<div class="card settings" id="settings">
 +  <div class="setrow">
 +    <div class="setlabel">Change picture every</div>
@@ -818,16 +1040,24 @@ index 0000000..1ce70e9
 +    <div class="setlabel"><span>Sleep at night <small id="sleepSummary"></small></span>
 +      <label class="switch"><input type="checkbox" id="sleepOn"><span></span></label></div>
 +    <div class="hours" id="sleepHours" hidden>
-+      Screen off at <select id="sleepStart"></select> back on at <select id="sleepEnd"></select>
++      <span>Off</span><select id="sleepStart" aria-label="Screen off at"></select><span>On</span><select id="sleepEnd" aria-label="Screen back on at"></select>
 +    </div>
 +  </div>
 +  <div class="setrow" id="tzRow" hidden>
 +    <div class="setlabel"><span>Time zone <small id="tzName"></small></span></div>
 +    <button class="linkbtn" id="tzFix"></button>
 +  </div>
++  <div class="setrow">
++    <div class="setlabel">Frame name</div>
++    <div class="namerow"><input id="nameInput" maxlength="64" placeholder="e.g. Living room" autocomplete="off"><button class="btn small" id="nameSave">Save</button></div>
++  </div>
++  <div class="setrow">
++    <div class="setlabel">About this frame</div>
++    <dl class="info" id="info"></dl>
++  </div>
 +</div>
 +
-+<div class="sectionhead" style="margin-top:22px"><h2>Extras</h2></div>
++<div class="sectionhead"><h2>Extras</h2></div>
 +<div class="card extras" id="nytCard">
 +  <h3>The New York Times front page</h3>
 +  <p>Today’s print front page, made for the frame. Replaces yesterday’s.</p>
@@ -838,7 +1068,7 @@ index 0000000..1ce70e9
 +  </div>
 +  <button class="primary" id="nytGo">Put today’s front page on the frame</button>
 +  <div class="progress" id="nytStatus"></div>
-+  <label class="auto"><input type="checkbox" id="nytAuto"> Refresh it whenever I open this page</label>
++  <div class="autorow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="nytAuto"><span></span></label></div>
 +</div>
 +
 +<div class="selbar" id="selbar">
@@ -846,7 +1076,7 @@ index 0000000..1ce70e9
 +  <button class="btn danger" id="selRemove" disabled>Remove</button>
 +</div>
 +
-+<footer id="footer"><span id="sched"></span><br><a href="/advanced">Advanced settings</a></footer>
++<footer id="footer"><a href="/advanced">Advanced (troubleshooting)</a></footer>
 +
 +<div class="sheet-bg" id="sheetBg"></div>
 +<div class="sheet" id="sheet" role="dialog" aria-modal="true">
@@ -857,6 +1087,13 @@ index 0000000..1ce70e9
 +    <button class="btn" id="sheetClose">Close</button>
 +    <button class="btn go" id="sheetShow">Show now</button>
 +    <button class="btn danger" id="sheetDelete">Remove</button>
++  </div>
++</div>
++<div class="sheet" id="confirmSheet" role="alertdialog" aria-modal="true">
++  <div class="ctitle" id="confirmText"></div>
++  <div class="row">
++    <button class="btn" id="confirmNo">Cancel</button>
++    <button class="btn danger" id="confirmYes">Remove</button>
 +  </div>
 +</div>
 +<div class="toast" id="toast"></div>
@@ -884,6 +1121,16 @@ index 0000000..1ce70e9
 +    });
 +  }
 +  function fileUrl(n){ return "/files/" + encodeURIComponent(n); }
++  function thumbUrl(n, v){ return "/thumb/" + encodeURIComponent(n) + (v ? "?v=" + v : ""); }
++  // Thumbnails load as tiles scroll into view (our own observer, not loading="lazy").
++  var io = "IntersectionObserver" in window ? new IntersectionObserver(function(entries){
++    entries.forEach(function(e){ if (e.isIntersecting) { loadThumb(e.target); io.unobserve(e.target); } });
++  }, {rootMargin: "300px"}) : null;
++  function loadThumb(img){
++    if (img.dataset.loaded) return; img.dataset.loaded = "1";
++    img.onerror = function(){ if (img.dataset.full && img.src.indexOf("/files/") < 0) img.src = img.dataset.full; };
++    img.src = img.dataset.src;
++  }
 +
 +  // ---------- status ----------
 +  function hourName(h){ h = ((h % 24) + 24) % 24; var ap = h < 12 ? "am" : "pm"; var x = h % 12 || 12; return x + ap; }
@@ -911,21 +1158,19 @@ index 0000000..1ce70e9
 +    var on = media.screenOn !== false && br.screenOn !== false;
 +    var quiet = friendlyQuiet(cfg.quietHours);
 +    $("dot").className = "dot " + (on ? "on" : "sleep");
-+    var every = cfg.intervalMinutes ? "New picture every " + cfg.intervalMinutes + " min" : "";
-+    $("statusText").textContent = on ? (every || "Showing art") : "Screen is off";
-+    $("screenLabel").textContent = on ? "Turn off" : "Turn on";
-+    $("sched").textContent = [every, quiet].filter(Boolean).join(" · ");
-+    if (br.supported !== false && typeof br.step === "number") $("brightLabel").textContent = (br.step + 1) + " of 8";
++    var every = cfg.intervalMinutes ? "Every " + intervalLabel(cfg.intervalMinutes) : "";
++    $("statusText").textContent = on ? (every || "On") : "Screen off";
++    $("sched").textContent = quiet;
++    $("btnScreen").classList.toggle("off", !on);
++    $("btnScreen").setAttribute("aria-label", on ? "Turn the screen off" : "Turn the screen on");
++    $("brightRow").hidden = br.supported === false;
++    if (typeof br.step === "number" && !brightDragging && Date.now() - brightSetAt > 4000) { $("bright").value = br.step + 1; $("brightLabel").textContent = (br.step + 1) + "/8"; brightFill(); }
++    renderInfo(s);
 +    var cur = media.current || {};
 +    var curName = cur.originalFileName || (cur.key ? String(cur.key).split(/[\/:]/).pop() : "");
-+    if (curName) {
-+      $("now").hidden = false;
-+      $("nowName").textContent = curName;
-+      var isLocal = files.some(function(f){ return f.name === curName; });
-+      $("nowThumb").style.backgroundImage = isLocal && !VIDEO.test(curName) ? 'url("' + fileUrl(curName) + '")' : "";
-+    } else {
-+      $("now").hidden = true;
-+    }
++    $("nowName").textContent = curName || (on ? "—" : "Sleeping");
++    var isLocal = curName && files.some(function(f){ return f.name === curName; });
++    $("nowThumb").style.backgroundImage = isLocal && !VIDEO.test(curName) ? 'url("' + thumbUrl(curName) + '")' : "";
 +    markCurrent(curName);
 +    renderSettings(cfg);
 +  }
@@ -962,8 +1207,9 @@ index 0000000..1ce70e9
 +      if (VIDEO.test(f.name)) {
 +        t.innerHTML = '<div class="vid"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Video</div>';
 +      } else {
-+        var img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = "";
-+        img.src = fileUrl(f.name) + "?v=" + (f.lastModified || 0); t.appendChild(img);
++        var img = document.createElement("img"); img.alt = "";
++        img.dataset.src = thumbUrl(f.name, f.lastModified || 0); img.dataset.full = fileUrl(f.name);
++        t.appendChild(img); if (io) io.observe(img); else loadThumb(img);
 +      }
 +      if (f.warn) { var b = document.createElement("span"); b.className = "badge warn"; b.textContent = "Can’t show"; t.appendChild(b); }
 +      else if (/\.gif$/i.test(f.name)) { var gb = document.createElement("span"); gb.className = "badge gif"; gb.textContent = "GIF"; t.appendChild(gb); }
@@ -1006,7 +1252,8 @@ index 0000000..1ce70e9
 +    var v = $("sheetMedia").querySelector("video"); if (v) v.pause();
 +    sheetName = null;
 +  }
-+  $("sheetBg").onclick = closeSheet; $("sheetClose").onclick = closeSheet;
++  $("sheetBg").onclick = function(){ if (confirmResolve) closeConfirm(false); else closeSheet(); };
++  $("sheetClose").onclick = closeSheet;
 +  $("sheetDelete").onclick = function(){
 +    var n = sheetName; if (!n) return;
 +    var f = files.filter(function(x){ return x.name === n; })[0];
@@ -1025,7 +1272,31 @@ index 0000000..1ce70e9
 +  }
 +  $("btnNext").onclick = function(){ control("next", "GET", "Next picture coming up"); };
 +  $("btnScreen").onclick = function(){ control("screen", "GET"); };
-+  $("btnBright").onclick = function(){ control("brightness", "POST", "Brightness changed"); };
++  var brightDragging = false, brightSetAt = 0;
++  function brightFill(){ var el = $("bright"); el.style.setProperty("--pct", ((el.value - 1) / 7 * 100) + "%"); }
++  $("bright").addEventListener("input", function(){ brightDragging = true; $("brightLabel").textContent = this.value + "/8"; brightFill(); });
++  $("bright").addEventListener("change", function(){
++    brightDragging = false; brightSetAt = Date.now();
++    api("/control?action=brightness&step=" + (this.value - 1), {method: "POST"}).then(function(j){
++      if (!j || !j.fired) toast("The frame didn’t accept that");
++    }).catch(function(){ toast("Can’t reach the frame"); });
++  });
++
++  // ---------- on-page confirm (no browser dialogs) ----------
++  var confirmResolve = null;
++  function askConfirm(text, yesLabel){
++    $("confirmText").textContent = text; $("confirmYes").textContent = yesLabel || "OK";
++    $("sheetBg").classList.add("open"); $("confirmSheet").classList.add("open");
++    return new Promise(function(res){ confirmResolve = res; });
++  }
++  function closeConfirm(answer){
++    if (!confirmResolve) return;
++    $("confirmSheet").classList.remove("open");
++    if (!$("sheet").classList.contains("open")) $("sheetBg").classList.remove("open");
++    var r = confirmResolve; confirmResolve = null; r(answer);
++  }
++  $("confirmYes").onclick = function(){ closeConfirm(true); };
++  $("confirmNo").onclick = function(){ closeConfirm(false); };
 +
 +  // ---------- fit toggle ----------
 +  function renderFit(){ $("fitFill").classList.toggle("sel", fit === "fill"); $("fitWhole").classList.toggle("sel", fit === "whole"); }
@@ -1136,7 +1407,8 @@ index 0000000..1ce70e9
 +  $("selCancel").onclick = function(){ setSelecting(false); };
 +  $("selRemove").onclick = function(){
 +    var names = Object.keys(picked); if (!names.length) return;
-+    if (!confirm("Remove " + names.length + (names.length === 1 ? " photo" : " photos") + " from the frame?")) return;
++    askConfirm("Remove " + names.length + (names.length === 1 ? " photo" : " photos") + " from the frame?", "Remove").then(function(yes){
++    if (!yes) return;
 +    var byName = {}; files.forEach(function(f){ byName[f.name] = f; });
 +    names.reduce(function(chain, n){
 +      return chain.then(function(){
@@ -1146,6 +1418,7 @@ index 0000000..1ce70e9
 +      });
 +    }, Promise.resolve()).then(function(){
 +      toast("Removed " + names.length); setSelecting(false); refreshFiles();
++    });
 +    });
 +  };
 +
@@ -1218,6 +1491,26 @@ index 0000000..1ce70e9
 +  $("sleepOn").onchange = saveSleep; $("sleepStart").onchange = saveSleep; $("sleepEnd").onchange = saveSleep;
 +  var phoneTz = ""; try { phoneTz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch(e) {}
 +  $("tzFix").onclick = function(){ saveSettings({timeZone:phoneTz}, "Time zone set to " + phoneTz); };
++  var nameEditing = false;
++  $("nameInput").addEventListener("focus", function(){ nameEditing = true; });
++  $("nameInput").addEventListener("blur", function(){ setTimeout(function(){ nameEditing = false; }, 300); });
++  $("nameInput").addEventListener("keydown", function(e){ if (e.key === "Enter") { e.preventDefault(); $("nameSave").click(); } });
++  $("nameSave").onclick = function(){
++    var v = $("nameInput").value.trim(); $("nameInput").blur();
++    saveSettings({name: v}, v ? "Renamed to " + v : "Name cleared");
++  };
++  function bytes(n){ return n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : Math.round(n / 1e6) + " MB"; }
++  function renderInfo(s){
++    var t = s.telemetry || {}, wifi = t.wifi || (s.network || {}).wifi || {}, st = t.storage || {}, app = s.app || {}, rows = [];
++    if (wifi.ip) rows.push(["Address", wifi.ip]);
++    if (wifi.ssid) rows.push(["Wi-Fi", wifi.ssid]);
++    if (st.availBytes) rows.push(["Free space", bytes(st.availBytes) + (st.totalBytes ? " of " + bytes(st.totalBytes) : "")]);
++    if (t.uptime && t.uptime.uptime) rows.push(["Up for", t.uptime.uptime]);
++    if (app.versionName) rows.push(["App", app.versionName + (app.gitSha ? " · " + String(app.gitSha).slice(0, 7) : "")]);
++    var dl = $("info"); dl.innerHTML = "";
++    rows.forEach(function(r){ var dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = r[0]; dd.textContent = r[1]; dl.appendChild(dt); dl.appendChild(dd); });
++    if (!nameEditing) $("nameInput").value = (s.device || {}).name || "";
++  }
 +  function renderSettings(cfg){
 +    if (Date.now() - settingsDirty < 5000) return;
 +    renderIntervals(cfg.intervalMinutes || 5);

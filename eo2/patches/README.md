@@ -12,6 +12,12 @@
   a glitched JPEG or an animated glitch GIF (gifenc; unchanged pixels transparent, ~5 MB), uploads
   it and removes the previous front page. Optional "refresh whenever I open this page". Needs the
   phone online (pdf.js and gifenc load from cdnjs / jsdelivr).
+- Compact layout: header status, "now playing" card with Next / Power and a brightness slider
+  (`?action=brightness&step=0..7` sets a level directly), frame name and frame info in Settings,
+  on-page confirm sheet instead of browser dialogs.
+- `/thumb/<name>`: cached ~270x480 JPEG thumbnails for the gallery (beside `uploaded/` in
+  `files/thumbs`), loaded by an IntersectionObserver.
+- `POST /settings` also accepts `name` (the frame's display name).
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin
   checked, like uploads). Clears the legacy quiet-hour mirror so "off" sticks.
