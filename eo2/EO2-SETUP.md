@@ -1,5 +1,12 @@
 # EO2 setup — aphex3k/EO1, no keyboard needed
 
+## Updating to a newer build
+
+Put the new APK next to `update-eo2.sh` and run `bash update-eo2.sh FRAME_IP`. It updates in
+place, or, if the new build is signed with a different key, backs up your photos and settings,
+reinstalls, and restores them. The phone page lives at `http://FRAME_IP:8080/`; the original
+page is at `/advanced`. App changes are in `patches/`.
+
 ## Easiest: run the script (Mac)
 
 1. Make a folder, e.g. `~/EO2`, and put two files in it:

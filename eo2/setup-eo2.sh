@@ -55,8 +55,7 @@ ok "adb found: $(command -v adb)"
 
 # ---------------------------------------------------------------- 2. APK
 bold "Step 2/6 — Finding the APK"
-APK=""
-for f in "$HERE"/*.apk; do [ -f "$f" ] && APK="$f" && break; done
+APK="$(ls -t "$HERE"/*.apk 2>/dev/null | head -1)"   # newest .apk in the folder
 [ -n "$APK" ] || die "No .apk file next to this script (in $HERE).
   Put eo1-aphex3k-2.0.1.apk in this folder and run again."
 ok "Using $(basename "$APK")"

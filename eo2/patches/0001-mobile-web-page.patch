@@ -1,0 +1,1216 @@
+diff --git a/app/src/main/java/com/aphex3k/eo1/MainActivity.java b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
+index b12c5a6..fac4178 100644
+--- a/app/src/main/java/com/aphex3k/eo1/MainActivity.java
++++ b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
+@@ -6249,10 +6249,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+                 // Debug-only: "the clip that misbehaves is #600 of 1000", which ?action=next cannot
+                 // promise to reach. Checked and parked from this thread, which may read the pool's
+                 // key set but never its records; the rotation worker picks the record up.
+-                if (!BuildConfig.DEBUG || mediaManager == null) {
++                final String assetKey = params != null ? params.get("asset") : null;
++                // Release builds allow pinning an uploaded file (the phone page's "Show now");
++                // any other backend's asset stays debug-only.
++                boolean localAsset = assetKey != null && assetKey.startsWith("local:");
++                if ((!BuildConfig.DEBUG && !localAsset) || mediaManager == null) {
+                     return false;
+                 }
+-                final String assetKey = params != null ? params.get("asset") : null;
+                 if (!mediaManager.queueAssetDisplay(assetKey)) {
+                     return false;
+                 }
+diff --git a/app/src/main/java/com/aphex3k/eo1/WebServer.java b/app/src/main/java/com/aphex3k/eo1/WebServer.java
+index f6cbeb4..2a3dda7 100644
+--- a/app/src/main/java/com/aphex3k/eo1/WebServer.java
++++ b/app/src/main/java/com/aphex3k/eo1/WebServer.java
+@@ -259,6 +259,15 @@ public class WebServer {
+         if (path.equals("/") || path.equals("/index.html")) {
+             return "index";
+         }
++        if (path.equals("/advanced")) {
++            return "advanced";
++        }
++        if (path.equals("/icon.png")) {
++            return "icon";
++        }
++        if (path.equals("/settings")) {
++            return "simpleSettings";
++        }
+         if (path.equals("/state")) {
+             return "state";
+         }
+@@ -522,6 +531,15 @@ public class WebServer {
+ 
+         switch (routeKey) {
+             case "index":
++                if (!method.equals("GET")) {
++                    send(os, 405, "text/plain", "method not allowed");
++                    return;
++                }
++                String mobile = mobilePage();
++                send(os, 200, "text/html; charset=utf-8", mobile != null ? mobile : renderIndex());
++                break;
++
++            case "advanced":
+                 if (!method.equals("GET")) {
+                     send(os, 405, "text/plain", "method not allowed");
+                     return;
+@@ -529,6 +547,31 @@ public class WebServer {
+                 send(os, 200, "text/html; charset=utf-8", renderIndex());
+                 break;
+ 
++            case "simpleSettings": {
++                if (!method.equals("POST")) {
++                    send(os, 405, "text/plain", "method not allowed");
++                    return;
++                }
++                if (!configWriteAllowed(headers, boundPort)) {
++                    sendJson(os, 403, errorJson("cross-origin request rejected"));
++                    return;
++                }
++                handleSimpleSettings(headers, is, os);
++                break;
++            }
++
++            case "icon": {
++                byte[] icon = classpathBytes("/web/icon.png");
++                if (icon == null) {
++                    send(os, 404, "text/plain", "not found");
++                    return;
++                }
++                writeHead(os, 200, "image/png", icon.length);
++                os.write(icon);
++                os.flush();
++                break;
++            }
++
+             case "state":
+                 if (!method.equals("GET")) {
+                     send(os, 405, "text/plain", "method not allowed");
+@@ -1031,6 +1074,98 @@ public class WebServer {
+      * {@code POST /config/import}). The body is read off the socket with a hard cap before the
+      * controller touches it.
+      */
++    private static final java.util.regex.Pattern CRON_FIELD =
++            java.util.regex.Pattern.compile("^[0-9*,/\\-]{1,40}$");
++
++    /**
++     * {@code POST /settings}: the phone page's narrow settings write. Changes only the slideshow
++     * interval, quiet hours and time zone, never a backend or credential, so it needs no
++     * configuration token: like an upload, a connected LAN is the perimeter. Body:
++     * {@code {"interval":5,"quietHours":["* 20-23,0-7 * * *"],"timeZone":"America/Los_Angeles"}},
++     * every field optional.
++     */
++    private void handleSimpleSettings(Map<String, String> headers, InputStream is, OutputStream os)
++            throws IOException {
++        long declared = parseLongLenient(headers.get("content-length"));
++        if (declared < 0 || declared > 4096) {
++            sendJson(os, 413, errorJson("settings body missing or too large"));
++            return;
++        }
++        JsonObject req;
++        JsonObject cfg;
++        try {
++            req = com.google.gson.JsonParser.parseString(new String(readAll(is, declared), UTF_8))
++                    .getAsJsonObject();
++            cfg = com.google.gson.JsonParser.parseString(controller.exportConfigurationJson())
++                    .getAsJsonObject();
++        } catch (Exception e) {
++            sendJson(os, 400, errorJson("expected a JSON object"));
++            return;
++        }
++        if (req.has("interval")) {
++            int interval;
++            try {
++                interval = req.get("interval").getAsInt();
++            } catch (Exception e) {
++                interval = -1;
++            }
++            if (interval < 1 || interval > 10080) {
++                sendJson(os, 400, errorJson("interval must be 1 to 10080 minutes"));
++                return;
++            }
++            cfg.addProperty("interval", interval);
++        }
++        if (req.has("quietHours")) {
++            JsonArray out = new JsonArray();
++            try {
++                JsonArray in = req.getAsJsonArray("quietHours");
++                if (in.size() > 8) {
++                    throw new IllegalArgumentException();
++                }
++                for (int i = 0; i < in.size(); i++) {
++                    String expr = in.get(i).getAsString().trim();
++                    String[] fields = expr.split("\\s+");
++                    if (fields.length != 5) {
++                        throw new IllegalArgumentException();
++                    }
++                    for (String f : fields) {
++                        if (!CRON_FIELD.matcher(f).matches()) {
++                            throw new IllegalArgumentException();
++                        }
++                    }
++                    out.add(expr);
++                }
++            } catch (Exception e) {
++                sendJson(os, 400, errorJson("quietHours must be a list of 5-field cron expressions"));
++                return;
++            }
++            cfg.add("quietHours", out);
++            // The legacy start/end mirror would otherwise resurrect a window the user just cleared.
++            cfg.addProperty("startQuietHour", -1);
++            cfg.addProperty("endQuietHour", -1);
++        }
++        if (req.has("timeZone")) {
++            String tz = req.get("timeZone").getAsString();
++            if (!java.util.Arrays.asList(java.util.TimeZone.getAvailableIDs()).contains(tz)) {
++                sendJson(os, 400, errorJson("unknown time zone"));
++                return;
++            }
++            cfg.addProperty("selectedTimeZoneId", tz);
++        }
++        String error;
++        try {
++            error = controller.importConfigurationJson(cfg.toString());
++        } catch (Exception e) {
++            Log.e(TAG, "settings import failed", e);
++            error = "internal error: " + e.getClass().getSimpleName();
++        }
++        if (error == null) {
++            sendJson(os, 200, okJson("settings saved"));
++        } else {
++            sendJson(os, 400, errorJson(error));
++        }
++    }
++
+     private void handleConfigPost(Map<String, String> headers, InputStream is, OutputStream os)
+             throws IOException {
+         long declared = parseLongLenient(headers.get("content-length"));
+@@ -1208,6 +1343,46 @@ public class WebServer {
+ 
+     // --- rendering ---
+ 
++    private static volatile String sMobilePage;
++
++    /** The phone-first landing page, bundled as a classpath resource; null if it is missing. */
++    private static String mobilePage() {
++        String page = sMobilePage;
++        if (page == null) {
++            byte[] b = classpathBytes("/web/mobile.html");
++            if (b == null) {
++                return null;
++            }
++            page = new String(b, UTF_8);
++            sMobilePage = page;
++        }
++        return page;
++    }
++
++    private static byte[] classpathBytes(String name) {
++        InputStream in = WebServer.class.getResourceAsStream(name);
++        if (in == null) {
++            return null;
++        }
++        try {
++            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
++            byte[] buf = new byte[8192];
++            int n;
++            while ((n = in.read(buf)) != -1) {
++                out.write(buf, 0, n);
++            }
++            return out.toByteArray();
++        } catch (IOException e) {
++            return null;
++        } finally {
++            try {
++                in.close();
++            } catch (IOException ignored) {
++                // best effort
++            }
++        }
++    }
++
+     private String renderIndex() {
+         File dir = controller.uploadedDir();
+         UploadedMedia.FileInfo[] files = controller.listUploadedFiles();
+@@ -1232,6 +1407,7 @@ public class WebServer {
+             sb.append("<p><small>").append(escapeHtml(termsNotice)).append("</small></p>");
+         }
+         sb.append("<p>").append(escapeHtml(controller.appBuildSummary())).append("</p>");
++        sb.append("<p><a href=\"/\">&larr; simple view</a></p>");
+         sb.append("<p><a href=\"/state\">state</a> · <a href=\"/logs\">logs</a> · ")
+                 .append("<a href=\"/crashes\">crashes</a> · ")
+                 .append("<a href=\"/reports\">reports</a> · ")
+@@ -2156,6 +2332,7 @@ public class WebServer {
+             o.addProperty("name", f.name);
+             o.addProperty("size", f.size);
+             o.addProperty("lastModified", f.lastModified);
++            o.addProperty("assetKey", "local:" + com.aphex3k.media.local.LocalMediaBackend.localAssetIdFor(f.name));
+             arr.add(o);
+         }
+         return arr.toString();
+diff --git a/app/src/main/resources/web/icon.png b/app/src/main/resources/web/icon.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..ea91745b542328f2c151680075ea136db7df0d07
+GIT binary patch
+literal 18998
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
+new file mode 100644
+index 0000000..8152222
+--- /dev/null
++++ b/app/src/main/resources/web/mobile.html
+@@ -0,0 +1,585 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
++<meta name="apple-mobile-web-app-capable" content="yes">
++<meta name="mobile-web-app-capable" content="yes">
++<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
++<meta name="apple-mobile-web-app-title" content="Frame">
++<meta name="theme-color" content="#111111">
++<link rel="apple-touch-icon" href="/icon.png">
++<link rel="icon" href="/icon.png">
++<title>Frame</title>
++<style>
++:root{
++  --bg:#f4f2ee;--card:#ffffff;--ink:#1b1a18;--muted:#6f6a63;--line:#e4e0d9;
++  --accent:#1b1a18;--accent-ink:#ffffff;--good:#2f7d4f;--warn:#b5651d;--bad:#b3261e;
++  --radius:16px;--shadow:0 1px 2px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.06);
++}
++@media (prefers-color-scheme:dark){:root{
++  --bg:#111110;--card:#1c1b1a;--ink:#f2efe9;--muted:#a19b92;--line:#2c2a27;
++  --accent:#f2efe9;--accent-ink:#111110;--good:#6cc08b;--warn:#e3a35d;--bad:#ff8a80;
++  --shadow:none;
++}}
++*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
++html,body{margin:0;background:var(--bg);color:var(--ink)}
++body{font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
++  padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 24px);
++  max-width:640px;margin:0 auto}
++header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 14px}
++h1{font-size:28px;letter-spacing:-.02em;margin:0}
++.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px;margin-top:2px}
++.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
++.dot.on{background:var(--good)}.dot.sleep{background:var(--warn)}.dot.off{background:var(--bad)}
++.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid var(--line)}
++.now{display:flex;gap:14px;padding:12px;align-items:center;margin-bottom:12px}
++.now .thumb{width:54px;aspect-ratio:9/16;border-radius:8px;background:var(--line) center/cover no-repeat;flex:none}
++.now .label{font-size:13px;color:var(--muted)}
++.now .name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
++button{font:inherit;color:inherit;border:0;cursor:pointer}
++.ctl{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 6px;
++  display:flex;flex-direction:column;align-items:center;gap:4px;font-size:13px;font-weight:600;box-shadow:var(--shadow)}
++.ctl svg{width:22px;height:22px}
++.ctl:active,.primary:active{transform:scale(.97)}
++.ctl small{font-weight:400;color:var(--muted);font-size:11px}
++.primary{width:100%;background:var(--accent);color:var(--accent-ink);border-radius:14px;padding:16px;
++  font-weight:700;font-size:17px;display:flex;align-items:center;justify-content:center;gap:10px}
++.primary svg{width:22px;height:22px}
++.fitrow{display:flex;justify-content:center;gap:6px;margin:10px 0 18px;font-size:14px}
++.seg{display:inline-flex;background:var(--line);border-radius:10px;padding:3px}
++.seg button{background:none;padding:6px 12px;border-radius:8px;font-size:13px;color:var(--muted)}
++.seg button.sel{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
++.sectionhead{display:flex;justify-content:space-between;align-items:baseline;margin:6px 2px 10px}
++h2{font-size:18px;margin:0}
++.count{color:var(--muted);font-size:14px}
++.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
++.tile{position:relative;aspect-ratio:9/16;border-radius:10px;overflow:hidden;background:var(--line);padding:0}
++.tile img{width:100%;height:100%;object-fit:cover;display:block}
++.tile .badge{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;
++  font-weight:700;padding:2px 7px;border-radius:999px}
++.tile .badge.warn{background:var(--warn)}
++.tile .vid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;font-weight:600;flex-direction:column;gap:6px}
++.tile .vid svg{width:28px;height:28px}
++.tile.pending{opacity:.55}
++.tile .bar{position:absolute;left:0;bottom:0;height:4px;background:var(--good);transition:width .2s}
++.empty{padding:28px 16px;text-align:center;color:var(--muted)}
++.empty b{display:block;color:var(--ink);font-size:17px;margin-bottom:4px}
++footer{margin-top:28px;text-align:center;font-size:13px;color:var(--muted)}
++footer a{color:var(--muted)}
++.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:10}
++.sheet{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--card);
++  border-radius:20px 20px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px);transform:translateY(100%);
++  transition:transform .25s ease,visibility 0s .25s;z-index:11;visibility:hidden}
++.sheet.open{transform:none;visibility:visible;transition:transform .25s ease}.sheet-bg.open{display:block}
++.sheet .preview{width:100%;max-height:55vh;object-fit:contain;border-radius:12px;background:#000;display:block}
++.sheet .meta{color:var(--muted);font-size:13px;margin:10px 2px;word-break:break-all}
++.sheet .warnbox{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--ink);border-radius:10px;padding:10px;font-size:13px;margin-bottom:10px;white-space:pre-wrap}
++.sheet .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
++.btn{background:var(--line);border-radius:12px;padding:14px;font-weight:600}
++.btn.danger{background:var(--bad);color:#fff}
++.settings{padding:4px 14px;margin:18px 0 6px}
++.setrow{padding:12px 0;border-bottom:1px solid var(--line)}
++.setrow:last-child{border-bottom:0}
++.setlabel{font-weight:600;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
++.setlabel small{font-weight:400;color:var(--muted);font-size:13px}
++.chips{display:flex;flex-wrap:wrap;gap:6px}
++.chip{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:8px 13px;font-size:14px}
++.chip.sel{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
++.switch{position:relative;width:51px;height:31px;flex:none}
++.switch input{opacity:0;width:0;height:0;position:absolute}
++.switch span{position:absolute;inset:0;background:var(--line);border-radius:999px;transition:.2s}
++.switch span:before{content:"";position:absolute;width:27px;height:27px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
++.switch input:checked+span{background:var(--good)}
++.switch input:checked+span:before{transform:translateX(20px)}
++.hours{display:flex;gap:10px;align-items:center;margin-top:10px;font-size:15px;flex-wrap:wrap}
++.hours select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
++.linkbtn{background:none;color:var(--ink);text-decoration:underline;padding:0;font-size:14px}
++.selbtn{background:none;font-size:15px;font-weight:600;color:var(--ink);padding:4px 2px}
++.tile .check{position:absolute;right:6px;top:6px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;
++  background:rgba(0,0,0,.25);display:none;box-shadow:0 1px 3px rgba(0,0,0,.4)}
++.selecting .tile .check{display:block}
++.tile.picked .check{background:var(--good);border-color:var(--good)}
++.tile.picked .check:after{content:"";position:absolute;left:7px;top:3px;width:6px;height:11px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
++.tile.picked img{opacity:.75}
++.selbar{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--card);border-top:1px solid var(--line);
++  padding:12px 16px calc(env(safe-area-inset-bottom) + 12px);display:none;gap:8px;grid-template-columns:1fr 1fr;z-index:9}
++.selecting .selbar{display:grid}
++.selecting footer{margin-bottom:90px}
++.sheet .row3{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:8px}
++.btn.go{background:var(--accent);color:var(--accent-ink)}
++.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translate(-50%,-40px);
++  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;
++  transition:all .25s;z-index:20;max-width:90vw;text-align:center}
++.toast.show{opacity:1;transform:translate(-50%,0)}
++.offline{display:none;background:var(--bad);color:#fff;border-radius:12px;padding:10px 12px;font-size:14px;margin-bottom:12px}
++</style>
++</head>
++<body>
++<header>
++  <div>
++    <h1 id="title">Frame</h1>
++    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Connecting…</span></div>
++  </div>
++</header>
++
++<div class="offline" id="offline">Can’t reach the frame. Make sure your phone is on the same Wi-Fi.</div>
++
++<div class="card now" id="now" hidden>
++  <div class="thumb" id="nowThumb"></div>
++  <div style="min-width:0">
++    <div class="label">On the frame now</div>
++    <div class="name" id="nowName">—</div>
++  </div>
++</div>
++
++<div class="controls">
++  <button class="ctl" id="btnNext" aria-label="Next picture">
++    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/></svg>
++    Next
++  </button>
++  <button class="ctl" id="btnScreen" aria-label="Screen on or off">
++    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>
++    <span id="screenLabel">Screen</span>
++  </button>
++  <button class="ctl" id="btnBright" aria-label="Brightness">
++    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
++    Brightness <small id="brightLabel"></small>
++  </button>
++</div>
++
++<button class="primary" id="btnAdd">
++  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
++  Add photos
++</button>
++<input type="file" id="picker" accept="image/*,video/*" multiple hidden>
++
++<div class="fitrow">
++  <div class="seg" role="group" aria-label="How photos fit the frame">
++    <button id="fitFill" class="sel">Fill frame</button>
++    <button id="fitWhole">Show whole photo</button>
++  </div>
++</div>
++
++<div class="sectionhead"><h2>On rotation <span class="count" id="count"></span></h2><button class="selbtn" id="btnSelect" hidden>Select</button></div>
++<div class="grid" id="grid"></div>
++<div class="card empty" id="empty" hidden><b>No photos yet</b>Tap “Add photos” to put your first picture on the wall.</div>
++
++<div class="card settings" id="settings">
++  <div class="setrow">
++    <div class="setlabel">Change picture every</div>
++    <div class="chips" id="intervalChips"></div>
++  </div>
++  <div class="setrow">
++    <div class="setlabel"><span>Sleep at night <small id="sleepSummary"></small></span>
++      <label class="switch"><input type="checkbox" id="sleepOn"><span></span></label></div>
++    <div class="hours" id="sleepHours" hidden>
++      Screen off at <select id="sleepStart"></select> back on at <select id="sleepEnd"></select>
++    </div>
++  </div>
++  <div class="setrow" id="tzRow" hidden>
++    <div class="setlabel"><span>Time zone <small id="tzName"></small></span></div>
++    <button class="linkbtn" id="tzFix"></button>
++  </div>
++</div>
++
++<div class="selbar" id="selbar">
++  <button class="btn" id="selCancel">Cancel</button>
++  <button class="btn danger" id="selRemove" disabled>Remove</button>
++</div>
++
++<footer id="footer"><span id="sched"></span><br><a href="/advanced">Advanced settings</a></footer>
++
++<div class="sheet-bg" id="sheetBg"></div>
++<div class="sheet" id="sheet" role="dialog" aria-modal="true">
++  <div id="sheetMedia"></div>
++  <div class="meta" id="sheetMeta"></div>
++  <div class="warnbox" id="sheetWarn" hidden></div>
++  <div class="row3">
++    <button class="btn" id="sheetClose">Close</button>
++    <button class="btn go" id="sheetShow">Show now</button>
++    <button class="btn danger" id="sheetDelete">Remove</button>
++  </div>
++</div>
++<div class="toast" id="toast"></div>
++
++<script>
++(function(){
++  "use strict";
++  var W = 1080, H = 1920;                       // the EO panel, portrait
++  var $ = function(id){ return document.getElementById(id); };
++  var state = null, files = [], pending = [], sheetName = null, selecting = false, picked = {};
++  var fit = "fill";
++  try { fit = localStorage.getItem("fit") || "fill"; } catch(e) {}
++
++  var VIDEO = /\.(mp4|mov|m4v|mkv|avi|ts|webm|3gp|mpg|mpeg)$/i;
++  var IMAGE = /\.(jpe?g|png|gif|webp|bmp)$/i;
++
++  function toast(msg, ms){
++    var t = $("toast"); t.textContent = msg; t.classList.add("show");
++    clearTimeout(toast._t); toast._t = setTimeout(function(){ t.classList.remove("show"); }, ms || 2600);
++  }
++  function api(path, opts){
++    return fetch(path, Object.assign({cache:"no-store"}, opts || {})).then(function(r){
++      if (!r.ok) throw new Error("HTTP " + r.status);
++      return r.json();
++    });
++  }
++  function fileUrl(n){ return "/files/" + encodeURIComponent(n); }
++
++  // ---------- status ----------
++  function hourName(h){ h = ((h % 24) + 24) % 24; var ap = h < 12 ? "am" : "pm"; var x = h % 12 || 12; return x + ap; }
++  function friendlyQuiet(list){
++    if (!list || !list.length) return "";
++    var m = /^\*\s+([\d,\-]+)\s+\*\s+\*\s+\*$/.exec((list[0] || "").trim());
++    if (!m || list.length > 1) return "Sleeps on a schedule";
++    var hours = {};
++    m[1].split(",").forEach(function(p){
++      var r = p.split("-").map(Number), a = r[0], b = r.length > 1 ? r[1] : r[0];
++      for (var h = a; h <= b; h++) hours[h] = 1;
++    });
++    var start = -1;
++    for (var i = 0; i < 24; i++) if (hours[i] && !hours[(i + 23) % 24]) { start = i; break; }
++    if (start < 0) return "Sleeps all day";
++    var end = start; while (hours[(end + 1) % 24] && (end + 1) % 24 !== start) end = (end + 1) % 24;
++    return "Sleeps " + hourName(start) + "–" + hourName(end + 1);
++  }
++  function renderState(){
++    var s = state || {};
++    var dev = s.device || {}, media = s.media || {}, br = s.brightness || {}, cfg = s.config || {};
++    var name = dev.name || (dev.platform ? dev.platform.toUpperCase() : "") || "Frame";
++    $("title").textContent = name;
++    document.title = name;
++    var on = media.screenOn !== false && br.screenOn !== false;
++    var quiet = friendlyQuiet(cfg.quietHours);
++    $("dot").className = "dot " + (on ? "on" : "sleep");
++    var every = cfg.intervalMinutes ? "New picture every " + cfg.intervalMinutes + " min" : "";
++    $("statusText").textContent = on ? (every || "Showing art") : "Screen is off";
++    $("screenLabel").textContent = on ? "Turn off" : "Turn on";
++    $("sched").textContent = [every, quiet].filter(Boolean).join(" · ");
++    if (br.supported !== false && typeof br.step === "number") $("brightLabel").textContent = (br.step + 1) + " of 8";
++    var cur = media.current || {};
++    var curName = cur.originalFileName || (cur.key ? String(cur.key).split(/[\/:]/).pop() : "");
++    if (curName) {
++      $("now").hidden = false;
++      $("nowName").textContent = curName;
++      var isLocal = files.some(function(f){ return f.name === curName; });
++      $("nowThumb").style.backgroundImage = isLocal && !VIDEO.test(curName) ? 'url("' + fileUrl(curName) + '")' : "";
++    } else {
++      $("now").hidden = true;
++    }
++    markCurrent(curName);
++    renderSettings(cfg);
++  }
++  function markCurrent(n){
++    Array.prototype.forEach.call(document.querySelectorAll(".tile"), function(t){
++      var b = t.querySelector(".badge.cur");
++      if (t.dataset.name === n && !b) { b = document.createElement("span"); b.className = "badge cur"; b.textContent = "Showing"; t.appendChild(b); }
++      if (t.dataset.name !== n && b) b.remove();
++    });
++  }
++  function refreshState(){
++    return api("/state").then(function(j){ state = j; $("offline").style.display = "none"; renderState(); })
++      .catch(function(){ $("offline").style.display = "block"; $("dot").className = "dot off"; $("statusText").textContent = "Offline"; });
++  }
++
++  // ---------- gallery ----------
++  function refreshFiles(){
++    return api("/files").then(function(list){
++      var warn = {};
++      list.forEach(function(f){ var m = /^(.*)\.incompat\.txt$/i.exec(f.name); if (m) warn[m[1]] = f.name; });
++      files = list.filter(function(f){ return !/\.txt$/i.test(f.name) && !/^incoming_/.test(f.name); })
++                  .map(function(f){ f.warn = warn[f.name] || null; return f; })
++                  .sort(function(a, b){ return (b.lastModified || 0) - (a.lastModified || 0); });
++      renderGrid();
++      renderState();
++    }).catch(function(){});
++  }
++  function renderGrid(){
++    var g = $("grid"); g.innerHTML = "";
++    pending.forEach(function(p){ g.appendChild(p.el); });
++    files.forEach(function(f){
++      var t = document.createElement("button");
++      t.className = "tile"; t.dataset.name = f.name; t.setAttribute("aria-label", f.name);
++      if (VIDEO.test(f.name)) {
++        t.innerHTML = '<div class="vid"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Video</div>';
++      } else {
++        var img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async"; img.alt = "";
++        img.src = fileUrl(f.name) + "?v=" + (f.lastModified || 0); t.appendChild(img);
++      }
++      if (f.warn) { var b = document.createElement("span"); b.className = "badge warn"; b.textContent = "Can’t show"; t.appendChild(b); }
++      var ck = document.createElement("span"); ck.className = "check"; t.appendChild(ck);
++      if (picked[f.name]) t.classList.add("picked");
++      t.onclick = function(){
++        if (selecting) { picked[f.name] = !picked[f.name]; if (!picked[f.name]) delete picked[f.name]; t.classList.toggle("picked", !!picked[f.name]); renderSelbar(); }
++        else openSheet(f);
++      };
++      g.appendChild(t);
++    });
++    var n = files.length;
++    $("count").textContent = n ? "· " + n : "";
++    $("btnSelect").hidden = n === 0;
++    if (n === 0 && selecting) setSelecting(false);
++    $("empty").hidden = n > 0 || pending.length > 0;
++  }
++
++  // ---------- sheet ----------
++  function openSheet(f){
++    sheetName = f.name;
++    var m = $("sheetMedia"); m.innerHTML = "";
++    if (VIDEO.test(f.name)) {
++      var v = document.createElement("video"); v.className = "preview"; v.src = fileUrl(f.name);
++      v.muted = true; v.playsInline = true; v.controls = true; m.appendChild(v);
++    } else {
++      var i = document.createElement("img"); i.className = "preview"; i.src = fileUrl(f.name); m.appendChild(i);
++    }
++    $("sheetMeta").textContent = f.name + " · " + Math.max(1, Math.round(f.size / 1024)) + " KB";
++    var w = $("sheetWarn"); w.hidden = true;
++    if (f.warn) {
++      fetch(fileUrl(f.warn)).then(function(r){ return r.text(); }).then(function(txt){
++        w.textContent = "The frame can’t display this file:\n" + txt.split("\n").slice(0, 6).join("\n"); w.hidden = false;
++      }).catch(function(){});
++    }
++    $("sheetBg").classList.add("open"); $("sheet").classList.add("open");
++  }
++  function closeSheet(){
++    $("sheetBg").classList.remove("open"); $("sheet").classList.remove("open");
++    var v = $("sheetMedia").querySelector("video"); if (v) v.pause();
++    sheetName = null;
++  }
++  $("sheetBg").onclick = closeSheet; $("sheetClose").onclick = closeSheet;
++  $("sheetDelete").onclick = function(){
++    var n = sheetName; if (!n) return;
++    var f = files.filter(function(x){ return x.name === n; })[0];
++    var jobs = [api(fileUrl(n) + "/delete", {method:"POST"})];
++    if (f && f.warn) jobs.push(api(fileUrl(f.warn) + "/delete", {method:"POST"}).catch(function(){}));
++    Promise.all(jobs).then(function(){ toast("Removed"); closeSheet(); refreshFiles(); })
++      .catch(function(){ toast("Couldn’t remove it — try again"); });
++  };
++
++  // ---------- controls ----------
++  function control(action, method, msg){
++    return api("/control?action=" + action, {method: method || "GET"}).then(function(j){
++      if (j && j.fired) { if (msg) toast(msg); setTimeout(refreshState, 1500); }
++      else toast("The frame didn’t accept that");
++    }).catch(function(){ toast("Can’t reach the frame"); });
++  }
++  $("btnNext").onclick = function(){ control("next", "GET", "Next picture coming up"); };
++  $("btnScreen").onclick = function(){ control("screen", "GET"); };
++  $("btnBright").onclick = function(){ control("brightness", "POST", "Brightness changed"); };
++
++  // ---------- fit toggle ----------
++  function renderFit(){ $("fitFill").classList.toggle("sel", fit === "fill"); $("fitWhole").classList.toggle("sel", fit === "whole"); }
++  $("fitFill").onclick = function(){ fit = "fill"; try{localStorage.setItem("fit", fit);}catch(e){} renderFit(); };
++  $("fitWhole").onclick = function(){ fit = "whole"; try{localStorage.setItem("fit", fit);}catch(e){} renderFit(); };
++  renderFit();
++
++  // ---------- upload ----------
++  $("btnAdd").onclick = function(){ $("picker").click(); };
++  $("picker").onchange = function(){
++    var list = Array.prototype.slice.call(this.files || []); this.value = "";
++    if (!list.length) return;
++    var jobs = list.map(function(file){
++      var el = document.createElement("div"); el.className = "tile pending";
++      el.innerHTML = '<div class="vid">Preparing…</div><div class="bar" style="width:0"></div>';
++      var p = {file:file, el:el}; pending.push(p); return p;
++    });
++    renderGrid();
++    var ok = 0, failed = 0;
++    jobs.reduce(function(chain, p){
++      return chain.then(function(){ return processAndUpload(p).then(function(){ ok++; }, function(err){ failed++; console.warn(err); }); });
++    }, Promise.resolve()).then(function(){
++      pending = []; refreshFiles();
++      if (failed) toast(ok + " added, " + failed + " failed", 4000);
++      else toast(ok === 1 ? "Added — it’ll appear within a few minutes" : ok + " photos added", 3500);
++    });
++  };
++
++  function loadImage(file){
++    return new Promise(function(res, rej){
++      var url = URL.createObjectURL(file), img = new Image();
++      img.onload = function(){ res({img:img, url:url}); };
++      img.onerror = function(){ URL.revokeObjectURL(url); rej(new Error("Couldn’t read " + file.name)); };
++      img.src = url;
++    });
++  }
++  // Render to exactly 1080x1920 so the frame never has to scale or crop, and so HEIC/large
++  // phone photos arrive as small JPEGs the 2016-era board decodes instantly.
++  function renderForFrame(file){
++    return loadImage(file).then(function(o){
++      var img = o.img, iw = img.naturalWidth, ih = img.naturalHeight;
++      var c = document.createElement("canvas"); c.width = W; c.height = H;
++      var ctx = c.getContext("2d");
++      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
++      var cover = Math.max(W / iw, H / ih), contain = Math.min(W / iw, H / ih);
++      if (fit === "whole" && Math.abs(iw / ih - W / H) > 0.02) {
++        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
++        ctx.save(); ctx.filter = "blur(40px) brightness(0.55)";
++        ctx.drawImage(img, (W - iw * cover) / 2 - 40, (H - ih * cover) / 2 - 40, iw * cover + 80, ih * cover + 80);
++        ctx.restore();
++        ctx.drawImage(img, (W - iw * contain) / 2, (H - ih * contain) / 2, iw * contain, ih * contain);
++      } else {
++        ctx.drawImage(img, (W - iw * cover) / 2, (H - ih * cover) / 2, iw * cover, ih * cover);
++      }
++      URL.revokeObjectURL(o.url);
++      return new Promise(function(res, rej){
++        c.toBlob(function(b){ b ? res(b) : rej(new Error("Couldn’t convert " + file.name)); }, "image/jpeg", 0.9);
++      });
++    });
++  }
++  function baseName(n){ return (n || "photo").replace(/\.[^.]+$/, "").replace(/[^\w\-]+/g, "_").slice(0, 60) || "photo"; }
++
++  function processAndUpload(p){
++    var f = p.file, label = p.el.querySelector(".vid"), bar = p.el.querySelector(".bar");
++    var isVideo = (f.type || "").indexOf("video/") === 0 || VIDEO.test(f.name);
++    var isGif = /gif$/i.test(f.type) || /\.gif$/i.test(f.name);
++    var prep;
++    if (isVideo || isGif) {
++      prep = Promise.resolve({blob:f, name:f.name || ("clip_" + Date.now() + ".mp4")});
++    } else {
++      prep = renderForFrame(f).then(function(b){
++        var name = baseName(f.name) + "_" + Date.now().toString(36) + ".jpg";
++        var u = URL.createObjectURL(b);
++        p.el.insertAdjacentHTML("afterbegin", '<img src="' + u + '" alt="">');
++        return {blob:b, name:name};
++      });
++    }
++    return prep.then(function(o){
++      label.textContent = "Uploading…";
++      return new Promise(function(res, rej){
++        var fd = new FormData(); fd.append("file", o.blob, o.name);
++        var x = new XMLHttpRequest(); x.open("POST", "/upload");
++        x.upload.onprogress = function(e){ if (e.lengthComputable) bar.style.width = (100 * e.loaded / e.total) + "%"; };
++        x.onload = function(){
++          if (x.status >= 200 && x.status < 300) { bar.style.width = "100%"; label.textContent = ""; res(); }
++          else rej(new Error("Upload failed (" + x.status + ")"));
++        };
++        x.onerror = function(){ rej(new Error("Network error")); };
++        x.send(fd);
++      });
++    }).catch(function(err){ label.textContent = "Failed"; p.el.classList.remove("pending"); throw err; });
++  }
++
++  // ---------- select mode ----------
++  function setSelecting(on){
++    selecting = on; picked = {};
++    document.body.classList.toggle("selecting", on);
++    $("btnSelect").textContent = on ? "Done" : "Select";
++    Array.prototype.forEach.call(document.querySelectorAll(".tile.picked"), function(t){ t.classList.remove("picked"); });
++    renderSelbar();
++  }
++  function renderSelbar(){
++    var n = Object.keys(picked).length;
++    $("selRemove").disabled = n === 0;
++    $("selRemove").textContent = n ? "Remove " + n : "Remove";
++  }
++  $("btnSelect").onclick = function(){ setSelecting(!selecting); };
++  $("selCancel").onclick = function(){ setSelecting(false); };
++  $("selRemove").onclick = function(){
++    var names = Object.keys(picked); if (!names.length) return;
++    if (!confirm("Remove " + names.length + (names.length === 1 ? " photo" : " photos") + " from the frame?")) return;
++    var byName = {}; files.forEach(function(f){ byName[f.name] = f; });
++    names.reduce(function(chain, n){
++      return chain.then(function(){
++        var f = byName[n], jobs = [api(fileUrl(n) + "/delete", {method:"POST"})];
++        if (f && f.warn) jobs.push(api(fileUrl(f.warn) + "/delete", {method:"POST"}).catch(function(){}));
++        return Promise.all(jobs).catch(function(){});
++      });
++    }, Promise.resolve()).then(function(){
++      toast("Removed " + names.length); setSelecting(false); refreshFiles();
++    });
++  };
++
++  // ---------- show now ----------
++  $("sheetShow").onclick = function(){
++    var f = files.filter(function(x){ return x.name === sheetName; })[0];
++    if (!f || !f.assetKey) return;
++    api("/control?action=show&asset=" + encodeURIComponent(f.assetKey)).then(function(j){
++      if (j && j.fired) { toast("Showing it now"); closeSheet(); setTimeout(refreshState, 2500); }
++      else toast("Just added? It can be shown once the frame picks it up — try again in a few minutes.", 4500);
++    }).catch(function(){ toast("Can’t reach the frame"); });
++  };
++
++  // ---------- settings ----------
++  var INTERVALS = [[1,"1 min"],[5,"5 min"],[15,"15 min"],[30,"30 min"],[60,"1 hour"],[180,"3 hours"],[1440,"1 day"]];
++  var settingsDirty = 0;   // ignore polled state for a moment after a save
++  function intervalLabel(m){ return m % 1440 === 0 ? (m / 1440) + (m === 1440 ? " day" : " days") : m % 60 === 0 ? (m / 60) + (m === 60 ? " hour" : " hours") : m + " min"; }
++  function saveSettings(body, msg){
++    settingsDirty = Date.now();
++    return fetch("/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)})
++      .then(function(r){ return r.json().then(function(j){ if (!r.ok || !j.ok) throw new Error(j.msg || j.error || ("HTTP " + r.status)); return j; }); })
++      .then(function(){ toast(msg || "Saved"); setTimeout(refreshState, 1200); })
++      .catch(function(e){ toast("Couldn’t save: " + e.message, 4000); settingsDirty = 0; refreshState(); });
++  }
++  function renderIntervals(cur){
++    var box = $("intervalChips"); box.innerHTML = "";
++    var list = INTERVALS.slice();
++    if (cur && !list.some(function(x){ return x[0] === cur; })) list.push([cur, intervalLabel(cur)]), list.sort(function(a,b){ return a[0]-b[0]; });
++    list.forEach(function(x){
++      var b = document.createElement("button"); b.className = "chip" + (x[0] === cur ? " sel" : ""); b.textContent = x[1];
++      b.onclick = function(){
++        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove("sel"); }); b.classList.add("sel");
++        saveSettings({interval:x[0]}, "New picture every " + x[1]);
++      };
++      box.appendChild(b);
++    });
++  }
++  (function fillHours(){
++    ["sleepStart","sleepEnd"].forEach(function(id){
++      var sel = $(id);
++      for (var h = 0; h < 24; h++) { var o = document.createElement("option"); o.value = h; o.textContent = hourName(h); sel.appendChild(o); }
++    });
++  })();
++  function parseSleep(list){
++    // Only the simple "* A-B[,C-D] * * *" form is editable here; anything else is left alone.
++    if (!list || !list.length) return {on:false, start:22, end:7, simple:true};
++    var m = list.length === 1 && /^\*\s+([\d,\-]+)\s+\*\s+\*\s+\*$/.exec(list[0].trim());
++    if (!m) return {on:true, simple:false};
++    var hours = {};
++    m[1].split(",").forEach(function(p){ var r = p.split("-").map(Number); for (var h = r[0]; h <= (r.length > 1 ? r[1] : r[0]); h++) hours[h] = 1; });
++    var start = -1;
++    for (var i = 0; i < 24; i++) if (hours[i] && !hours[(i + 23) % 24]) { start = i; break; }
++    if (start < 0) return {on:true, simple:false};
++    var end = start; while (hours[(end + 1) % 24] && (end + 1) % 24 !== start) end = (end + 1) % 24;
++    return {on:true, start:start, end:(end + 1) % 24, simple:true};
++  }
++  function sleepCron(start, end){
++    if (start === end) return null;
++    var r = start < end ? start + "-" + (end - 1) : (end === 0 ? start + "-23" : start + "-23,0-" + (end - 1));
++    r = r.replace(/(^|,)(\d+)-\2(?=,|$)/g, "$1$2");
++    return "* " + r + " * * *";
++  }
++  function saveSleep(){
++    if (!$("sleepOn").checked) { $("sleepHours").hidden = true; return saveSettings({quietHours:[]}, "Screen stays on all day"); }
++    $("sleepHours").hidden = false;
++    var a = +$("sleepStart").value, b = +$("sleepEnd").value, c = sleepCron(a, b);
++    if (!c) { toast("Pick two different times"); return; }
++    saveSettings({quietHours:[c]}, "Sleeps " + hourName(a) + "–" + hourName(b));
++  }
++  $("sleepOn").onchange = saveSleep; $("sleepStart").onchange = saveSleep; $("sleepEnd").onchange = saveSleep;
++  var phoneTz = ""; try { phoneTz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch(e) {}
++  $("tzFix").onclick = function(){ saveSettings({timeZone:phoneTz}, "Time zone set to " + phoneTz); };
++  function renderSettings(cfg){
++    if (Date.now() - settingsDirty < 5000) return;
++    renderIntervals(cfg.intervalMinutes || 5);
++    var sl = parseSleep(cfg.quietHours);
++    $("sleepOn").checked = !!sl.on;
++    if (sl.simple && sl.on) { $("sleepStart").value = sl.start; $("sleepEnd").value = sl.end; }
++    else if (!sl.on) { $("sleepStart").value = 22; $("sleepEnd").value = 7; }
++    $("sleepHours").hidden = !sl.on || !sl.simple;
++    $("sleepSummary").textContent = sl.on ? (sl.simple ? "" : "custom schedule") : "";
++    var tz = cfg.timezone || "";
++    $("tzRow").hidden = !(phoneTz && tz !== phoneTz);
++    $("tzName").textContent = tz || "not set";
++    $("tzFix").textContent = "Use my phone’s time zone (" + phoneTz + ")";
++  }
++
++  // ---------- go ----------
++  refreshFiles().then(refreshState);
++  setInterval(refreshState, 15000);
++  document.addEventListener("visibilitychange", function(){ if (!document.hidden) { refreshFiles(); refreshState(); } });
++})();
++</script>
++</body>
++</html>
