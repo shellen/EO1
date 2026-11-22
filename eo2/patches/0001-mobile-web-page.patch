@@ -3418,10 +3418,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..fe05873
+index 0000000..4aa2ad2
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1348 @@
+@@ -0,0 +1,1349 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -3745,6 +3745,7 @@ index 0000000..fe05873
 +        <div class="seg" role="group" aria-label="Live style" id="musicStyles" style="flex-direction:column;align-items:stretch">
 +          <button data-ms="kinetic">Kinetic Type</button>
 +          <button data-ms="liquid">Liquid Light</button>
++          <button data-ms="wall">Album Wall</button>
 +        </div>
 +      </div>
 +    </div>
