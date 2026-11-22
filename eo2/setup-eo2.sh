@@ -22,6 +22,20 @@ STOCK_PKGS="com.electricobjects.app com.electricobjects.updater com.electricobje
 OLD_REPLACEMENTS="com.dan.eo1 com.spalt.eo1"   # earlier community APKs that also claim HOME
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# Pick the APK: if there is more than one, list them and let the user choose (newest first).
+pick_apk() {
+    local list n i choice
+    list="$(ls -t "$HERE"/*.apk 2>/dev/null)"
+    n="$(printf '%s\n' "$list" | grep -c . || true)"
+    [ "$n" -gt 0 ] 2>/dev/null || return 1
+    if [ "$n" -eq 1 ]; then printf '%s\n' "$list"; return 0; fi
+    echo "  Found $n APK files (newest first):" >&2
+    i=0; while IFS= read -r f; do i=$((i+1)); printf '    %d) %s\n' "$i" "$(basename "$f")" >&2; done <<< "$list"
+    printf '  Which one? [1]: ' >&2; read -r choice </dev/tty
+    case "${choice:-1}" in *[!0-9]*) choice=1;; esac
+    [ "${choice:-1}" -ge 1 ] && [ "${choice:-1}" -le "$n" ] || choice=1
+    printf '%s\n' "$list" | sed -n "${choice:-1}p"
+}
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -55,7 +69,7 @@ ok "adb found: $(command -v adb)"
 
 # ---------------------------------------------------------------- 2. APK
 bold "Step 2/6 — Finding the APK"
-APK="$(ls -t "$HERE"/*.apk 2>/dev/null | head -1)"   # newest .apk in the folder
+APK="$(pick_apk)"
 [ -n "$APK" ] || die "No .apk file next to this script (in $HERE).
   Put eo1-aphex3k-2.0.1.apk in this folder and run again."
 ok "Using $(basename "$APK")"

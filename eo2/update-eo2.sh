@@ -16,6 +16,20 @@ set -u
 APP_PKG="com.aphex3k.eo1"
 APP_DIR="/data/data/${APP_PKG}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# Pick the APK: if there is more than one, list them and let the user choose (newest first).
+pick_apk() {
+    local list n i choice
+    list="$(ls -t "$HERE"/*.apk 2>/dev/null)"
+    n="$(printf '%s\n' "$list" | grep -c . || true)"
+    [ "$n" -gt 0 ] 2>/dev/null || return 1
+    if [ "$n" -eq 1 ]; then printf '%s\n' "$list"; return 0; fi
+    echo "  Found $n APK files (newest first):" >&2
+    i=0; while IFS= read -r f; do i=$((i+1)); printf '    %d) %s\n' "$i" "$(basename "$f")" >&2; done <<< "$list"
+    printf '  Which one? [1]: ' >&2; read -r choice </dev/tty
+    case "${choice:-1}" in *[!0-9]*) choice=1;; esac
+    [ "${choice:-1}" -ge 1 ] && [ "${choice:-1}" -le "$n" ] || choice=1
+    printf '%s\n' "$list" | sed -n "${choice:-1}p"
+}
 
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
@@ -24,9 +38,9 @@ yesno(){ local a; printf '%s [Y/n]: ' "$1" >&2; read -r a </dev/tty; case "$a" i
 
 command -v adb >/dev/null 2>&1 || die "adb isn't installed. Run setup-eo2.sh first (or: brew install android-platform-tools)."
 
-APK="$(ls -t "$HERE"/*.apk 2>/dev/null | head -1)"
+APK="$(pick_apk)"
 [ -n "$APK" ] || die "No .apk file in $HERE."
-ok "Using $(basename "$APK") (newest .apk in this folder)"
+ok "Using $(basename "$APK")"
 
 IP="${1:-}"
 if [ -z "$IP" ]; then printf 'Frame IP address: ' >&2; read -r IP </dev/tty; fi
