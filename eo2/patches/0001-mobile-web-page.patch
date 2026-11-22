@@ -1,3 +1,29 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 247f1d5..1be4c5a 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -154,6 +154,9 @@ dependencies {
+     implementation 'com.squareup.retrofit2:retrofit:2.6.4'
+     implementation 'com.squareup.retrofit2:converter-gson:2.6.4'
+     implementation 'com.squareup.okhttp3:okhttp:3.12.13'
++    // Modern TLS (1.3, AES-GCM, ChaCha20) for the frame's Spotify connection only: Android 4.4's own
++    // stack offers CBC suites, which accounts.spotify.com refuses. minSdk 9.
++    implementation 'org.conscrypt:conscrypt-android:2.5.3'
+     // OkHttp 3.x transitively pulls okio 1.15.0 (CVE-2023-3635); 1.17.6 is the last 1.x
+     // release and is API-compatible with both okhttp 3.x and this app's direct okio usage.
+     implementation 'com.squareup.okio:okio:1.17.6'
+diff --git a/app/proguard-rules.pro b/app/proguard-rules.pro
+index 4dd96f7..02af6c7 100644
+--- a/app/proguard-rules.pro
++++ b/app/proguard-rules.pro
+@@ -76,3 +76,7 @@
+ # missing from this file". ./publish-update.sh now asks the built APK that question directly
+ # (its reflection gate), so a missing @Keep costs a release rather than a wall.
+ 
++
++# Conscrypt (modern TLS for the Spotify connection): JNI and reflective lookups.
++-keep class org.conscrypt.** { *; }
++-dontwarn org.conscrypt.**
 diff --git a/app/src/main/java/com/aphex3k/eo1/BrightnessManager.java b/app/src/main/java/com/aphex3k/eo1/BrightnessManager.java
 index ca8ed02..19fbb6c 100644
 --- a/app/src/main/java/com/aphex3k/eo1/BrightnessManager.java
@@ -282,10 +308,10 @@ index 110240e..d16c2d5 100644
  
 diff --git a/app/src/main/java/com/aphex3k/eo1/MusicService.java b/app/src/main/java/com/aphex3k/eo1/MusicService.java
 new file mode 100644
-index 0000000..51d877b
+index 0000000..3ac471c
 --- /dev/null
 +++ b/app/src/main/java/com/aphex3k/eo1/MusicService.java
-@@ -0,0 +1,614 @@
+@@ -0,0 +1,700 @@
 +package com.aphex3k.eo1;
 +
 +import android.util.Log;
@@ -589,14 +615,100 @@ index 0000000..51d877b
 +
 +    // ------------------------------------------------------------------ Spotify HTTP
 +
++    /**
++     * Android 4.4's TLS stack only offers CBC cipher suites, and accounts.spotify.com (the token
++     * endpoint) refuses them with a handshake failure. So this client runs TLS through a bundled
++     * Conscrypt provider (TLS 1.3 / AES-GCM / ChaCha20), still validating against the app's merged
++     * root bundle. Scoped to Spotify: the rest of the app keeps its own TLS path. If Conscrypt
++     * cannot load, fall back to that path.
++     */
 +    private OkHttpClient client() {
-+        if (http == null) {
-+            http = ApiServiceGenerator.enableTls12OnPreLollipop(new OkHttpClient.Builder()
-+                    .connectTimeout(15, TimeUnit.SECONDS)
-+                    .readTimeout(20, TimeUnit.SECONDS)
-+                    .writeTimeout(15, TimeUnit.SECONDS), null).build();
++        if (http != null) {
++            return http;
++        }
++        OkHttpClient.Builder b = new OkHttpClient.Builder()
++                .connectTimeout(15, TimeUnit.SECONDS)
++                .readTimeout(20, TimeUnit.SECONDS)
++                .writeTimeout(15, TimeUnit.SECONDS);
++        try {
++            java.security.Provider provider = org.conscrypt.Conscrypt.newProvider();
++            javax.net.ssl.X509TrustManager tm = com.aphex3k.eo1.trust.MergedTrust.create(true).trustManager;
++            if (tm == null) {
++                tm = org.conscrypt.Conscrypt.getDefaultX509TrustManager();
++            }
++            javax.net.ssl.SSLContext sc = javax.net.ssl.SSLContext.getInstance("TLS", provider);
++            sc.init(null, new javax.net.ssl.TrustManager[]{tm}, null);
++            b.sslSocketFactory(new HostnameSocketFactory(sc.getSocketFactory()), tm);
++            // TLS 1.2 with AES-GCM is what Spotify needs. Capped there because in TLS 1.3 Conscrypt
++            // reports the key exchange as "GENERIC", which the merged trust manager rejects.
++            b.connectionSpecs(java.util.Collections.singletonList(
++                    new okhttp3.ConnectionSpec.Builder(okhttp3.ConnectionSpec.MODERN_TLS)
++                            .tlsVersions(okhttp3.TlsVersion.TLS_1_2).build()));
++            http = b.build();
++            Log.i(TAG, "Spotify TLS via Conscrypt " + provider.getName());
++        } catch (Throwable t) {
++            Log.w(TAG, "Conscrypt unavailable, using the platform TLS stack: " + t);
++            http = ApiServiceGenerator.enableTls12OnPreLollipop(b, null).build();
 +        }
 +        return http;
++    }
++
++    /** Sets SNI and session tickets on Conscrypt sockets (the host is only known here). */
++    static final class HostnameSocketFactory extends javax.net.ssl.SSLSocketFactory {
++        private final javax.net.ssl.SSLSocketFactory d;
++
++        HostnameSocketFactory(javax.net.ssl.SSLSocketFactory delegate) {
++            d = delegate;
++        }
++
++        private java.net.Socket tune(java.net.Socket s, @Nullable String host) {
++            if (s instanceof javax.net.ssl.SSLSocket && org.conscrypt.Conscrypt.isConscrypt((javax.net.ssl.SSLSocket) s)) {
++                javax.net.ssl.SSLSocket ss = (javax.net.ssl.SSLSocket) s;
++                if (host != null) {
++                    org.conscrypt.Conscrypt.setHostname(ss, host);
++                }
++                org.conscrypt.Conscrypt.setUseSessionTickets(ss, true);
++            }
++            return s;
++        }
++
++        @Override
++        public String[] getDefaultCipherSuites() {
++            return d.getDefaultCipherSuites();
++        }
++
++        @Override
++        public String[] getSupportedCipherSuites() {
++            return d.getSupportedCipherSuites();
++        }
++
++        @Override
++        public java.net.Socket createSocket(java.net.Socket s, String host, int port, boolean autoClose)
++                throws IOException {
++            return tune(d.createSocket(s, host, port, autoClose), host);
++        }
++
++        @Override
++        public java.net.Socket createSocket(String host, int port) throws IOException {
++            return tune(d.createSocket(host, port), host);
++        }
++
++        @Override
++        public java.net.Socket createSocket(String host, int port, java.net.InetAddress local, int localPort)
++                throws IOException {
++            return tune(d.createSocket(host, port, local, localPort), host);
++        }
++
++        @Override
++        public java.net.Socket createSocket(java.net.InetAddress host, int port) throws IOException {
++            return tune(d.createSocket(host, port), null);
++        }
++
++        @Override
++        public java.net.Socket createSocket(java.net.InetAddress address, int port, java.net.InetAddress local,
++                int localPort) throws IOException {
++            return tune(d.createSocket(address, port, local, localPort), null);
++        }
 +    }
 +
 +    @Nullable
@@ -3418,7 +3530,7 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..4aa2ad2
+index 0000000..2a8e271
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
 @@ -0,0 +1,1349 @@
@@ -4495,7 +4607,7 @@ index 0000000..4aa2ad2
 +    $("musicOn").checked = !!sources.music; $("musicTake").checked = sources.musicTakeover !== false;
 +    $("spAuto").checked = ls("spAuto") === "1";
 +    var c = music.current, l = music.last;
-+    $("spWho").textContent = c ? "Playing: " + c.title + " — " + c.artist : l ? "Last played: " + l.artist : "Connected on the frame";
++    $("spWho").textContent = c ? "Playing: " + c.title + " — " + c.artist : l ? "Last played: " + l.artist : music.error ? "Connected, but the frame can’t reach Spotify right now" : "Connected on the frame";
 +  }
 +  function musicPreview(){
 +    var st = sources.musicStyle || "kinetic", ld = sources.musicLead || "artist";
@@ -4575,7 +4687,7 @@ index 0000000..4aa2ad2
 +    return refreshMusic().then(function(m){
 +      var r = (m.recent || []).slice();
 +      if (m.current && m.current.art && !r.some(function(a){ return a.art === m.current.art; })) r.unshift({album: m.current.album, artist: m.current.artist, art: m.current.art});
-+      if (!r.length) throw new Error(m.connected ? "No recent plays yet — the frame checks every couple of minutes" : "Connect Spotify first");
++      if (!r.length) throw new Error(!m.connected ? "Connect Spotify first" : m.error ? "the frame can’t reach Spotify (" + String(m.error).split("\n")[0].slice(0, 120) + ")" : "No recent plays yet — the frame checks every couple of minutes");
 +      return r.slice(0, max).map(function(a){ return {name: a.album, artist: a.artist, url: musicImg(a.art)}; });
 +    });
 +  }

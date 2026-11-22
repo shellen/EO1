@@ -38,6 +38,11 @@
   is the live page (Kinetic Type, Liquid Light, Album Wall; `?lead=artist|track|date`), added to the rotation
   as the `music-1` web entry. With take-over on, the music page is pinned on every rotation tick
   while something plays.
+- **Modern TLS for Spotify**: Android 4.4 only offers CBC cipher suites, which
+  accounts.spotify.com refuses (handshake failure), so `MusicService` runs its connections through a
+  bundled Conscrypt provider (`org.conscrypt:conscrypt-android:2.5.3`, ~1.3 MB armv7) capped at
+  TLS 1.2 with AES-GCM, validated against the app's merged root bundle. Only the Spotify client
+  uses it; the rest of the app's TLS is unchanged.
 - **Storage cleanup**: `GeneratedFilesJanitor` keeps the newest file of each generated kind,
   removes orphaned notes/thumbnails and stale upload temp folders, and caps the art cache; it runs
   at start, after uploads and hourly. Uploads that would leave under 150 MB free are refused.
