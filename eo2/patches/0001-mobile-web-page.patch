@@ -817,10 +817,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..081fd04
+index 0000000..735cb3c
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,868 @@
+@@ -0,0 +1,1210 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -973,6 +973,13 @@ index 0000000..081fd04
 +.info{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:14px}
 +.info dt{color:var(--muted)}.info dd{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 +.ctitle{font-weight:600;font-size:17px;text-align:center;margin:6px 0 16px}
++.extras + .extras{margin-top:10px}
++.extras .chips{margin-bottom:12px}
++.extras .steps{margin:0 0 12px;padding-left:20px;font-size:14px;color:var(--ink)}
++.extras .steps li{margin-bottom:8px}
++.extras code{font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 5px;word-break:break-all}
++.extras a{color:var(--ink)}
++.extras .who{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--muted);margin-bottom:10px}
 +.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translate(-50%,-40px);
 +  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;
 +  transition:all .25s;z-index:20;max-width:90vw;text-align:center}
@@ -1069,6 +1076,37 @@ index 0000000..081fd04
 +  <button class="primary" id="nytGo">Put today’s front page on the frame</button>
 +  <div class="progress" id="nytStatus"></div>
 +  <div class="autorow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="nytAuto"><span></span></label></div>
++</div>
++
++<div class="card extras" id="spCard">
++  <h3>Spotify</h3>
++  <div id="spSetup" hidden>
++    <p>Show the albums you’ve been playing, or what’s on right now. One-time setup, about 5 minutes:</p>
++    <ol class="steps">
++      <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify developer dashboard</a>, sign in, and tap <b>Create app</b> (any name, tick <b>Web API</b>).</li>
++      <li>Add this <b>Redirect URI</b>:<br><code id="spRedirectShow"></code> <button class="linkbtn" id="spCopy">Copy</button></li>
++      <li>Copy the app’s <b>Client ID</b> and paste it here:</li>
++    </ol>
++    <div class="namerow"><input id="spClient" placeholder="Client ID" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn small go" id="spConnect">Connect</button></div>
++    <p style="margin-top:10px"><button class="linkbtn" id="spRedirectEdit">Use a different redirect address</button></p>
++  </div>
++  <div id="spReady" hidden>
++    <div class="who"><span id="spWho">Connected</span><button class="linkbtn" id="spDisconnect">Disconnect</button></div>
++    <div class="seg" role="group" aria-label="Spotify style">
++      <button data-sp="grid">Album grid</button>
++      <button data-sp="anim">Animated</button>
++      <button data-sp="now">Now playing</button>
++    </div>
++    <div class="chips" id="spSizes">
++      <button class="chip" data-n="9">9 albums</button>
++      <button class="chip" data-n="12">12 albums</button>
++      <button class="chip" data-n="20">20 albums</button>
++    </div>
++    <button class="primary" id="spGo">Put it on the frame</button>
++    <div class="progress" id="spStatus"></div>
++    <div class="autorow" id="spAutoRow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="spAuto"><span></span></label></div>
++    <div class="autorow" id="spFollowRow" hidden><span>Follow along while this page is open</span><label class="switch"><input type="checkbox" id="spFollow"><span></span></label></div>
++  </div>
 +</div>
 +
 +<div class="selbar" id="selbar">
@@ -1344,9 +1382,7 @@ index 0000000..081fd04
 +      var cover = Math.max(W / iw, H / ih), contain = Math.min(W / iw, H / ih);
 +      if (fit === "whole" && Math.abs(iw / ih - W / H) > 0.02) {
 +        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
-+        ctx.save(); ctx.filter = "blur(40px) brightness(0.55)";
-+        ctx.drawImage(img, (W - iw * cover) / 2 - 40, (H - ih * cover) / 2 - 40, iw * cover + 80, ih * cover + 80);
-+        ctx.restore();
++        softBackdrop(ctx, img, iw, ih, 0.45);
 +        ctx.drawImage(img, (W - iw * contain) / 2, (H - ih * contain) / 2, iw * contain, ih * contain);
 +      } else {
 +        ctx.drawImage(img, (W - iw * cover) / 2, (H - ih * cover) / 2, iw * cover, ih * cover);
@@ -1681,8 +1717,314 @@ index 0000000..081fd04
 +    frontPage(true);
 +  }
 +
++  // ---------- shared drawing helpers ----------
++  // Blurred, darkened full-bleed backdrop. Safari's canvas has no ctx.filter, so blur by drawing
++  // the image tiny and scaling it back up with smoothing.
++  function softBackdrop(ctx, img, iw, ih, dark){
++    var t = document.createElement("canvas"); t.width = 18; t.height = 32;
++    var tc = t.getContext("2d"), c = Math.max(18 / iw, 32 / ih);
++    tc.drawImage(img, (18 - iw * c) / 2, (32 - ih * c) / 2, iw * c, ih * c);
++    var m = document.createElement("canvas"); m.width = 108; m.height = 192;
++    var mc = m.getContext("2d"); mc.imageSmoothingEnabled = true; mc.imageSmoothingQuality = "high"; mc.drawImage(t, 0, 0, 108, 192);
++    ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(m, 0, 0, W, H);
++    ctx.fillStyle = "rgba(0,0,0," + dark + ")"; ctx.fillRect(0, 0, W, H); ctx.restore();
++  }
++  function wrapText(ctx, text, x, y, maxW, lineH, maxLines){
++    var words = String(text || "").split(/\s+/), line = "", lines = [];
++    words.forEach(function(w){ var t = line ? line + " " + w : w; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; });
++    if (line) lines.push(line);
++    if (lines.length > maxLines) { lines = lines.slice(0, maxLines); var last = lines[maxLines - 1]; while (ctx.measureText(last + "…").width > maxW && last.length) last = last.slice(0, -1); lines[maxLines - 1] = last + "…"; }
++    lines.forEach(function(l, i){ ctx.fillText(l, x, y + i * lineH); });
++    return lines.length;
++  }
++  var FONT = '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif';
++  function loadCover(url){
++    return new Promise(function(res, rej){ var im = new Image(); im.crossOrigin = "anonymous";
++      im.onload = function(){ res(im); }; im.onerror = function(){ rej(new Error("Couldn’t load album art")); }; im.src = url; });
++  }
++  // Upload, drop older files with the same prefix, and optionally put it on screen right away.
++  function replaceOnFrame(blob, name, prefix, say, showIt){
++    return uploadBlob(blob, name, function(f){ say("Sending to the frame… " + Math.round(f * 100) + "%"); }).then(function(){
++      return api("/files");
++    }).then(function(list){
++      var old = list.filter(function(f){ return f.name.indexOf(prefix) === 0 && f.name !== name; });
++      return Promise.all(old.map(function(f){ return api(fileUrl(f.name) + "/delete", {method: "POST"}).catch(function(){}); }))
++        .then(function(){ return list.filter(function(f){ return f.name === name; })[0]; });
++    }).then(function(f){
++      refreshFiles();
++      if (!showIt || !f || !f.assetKey) return;
++      var show = function(){ return api("/control?action=show&asset=" + encodeURIComponent(f.assetKey)).then(function(j){ return j && j.fired; }); };
++      // A new upload joins the rotation on the frame's next tick; "next" forces that tick.
++      return show().then(function(ok){
++        if (ok) return;
++        return api("/control?action=next").then(function(){ return new Promise(function(r){ setTimeout(r, 2500); }); }).then(show);
++      }).catch(function(){});
++    });
++  }
++
++  // ---------- extras: Spotify ----------
++  // Runs on the phone like the front page: Spotify's API, token endpoint and album art all allow
++  // browser access. Spotify only redirects logins to https, so from the plain-http home address the
++  // login bounces through a tiny static page that hands the one-time code back (PKCE keeps the code
++  // useless to anyone else). Opened over https (e.g. Tailscale Serve) the page is its own redirect.
++  function sha256(bytes){ // bytes: Uint8Array -> Uint8Array(32)
++    var K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
++    var H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
++    var l = bytes.length, n = ((l + 9 + 63) >> 6) << 6, m = new Uint8Array(n); m.set(bytes); m[l] = 0x80;
++    var bits = l * 8; for (var i = 0; i < 4; i++) m[n - 1 - i] = (bits >>> (8 * i)) & 255; m[n - 5] = Math.floor(l / 0x20000000) & 255;
++    var w = new Uint32Array(64);
++    for (var o = 0; o < n; o += 64) {
++      for (i = 0; i < 16; i++) w[i] = (m[o+4*i] << 24) | (m[o+4*i+1] << 16) | (m[o+4*i+2] << 8) | m[o+4*i+3];
++      for (i = 16; i < 64; i++) { var a0 = w[i-15], a1 = w[i-2];
++        var s0 = ((a0 >>> 7) | (a0 << 25)) ^ ((a0 >>> 18) | (a0 << 14)) ^ (a0 >>> 3), s1 = ((a1 >>> 17) | (a1 << 15)) ^ ((a1 >>> 19) | (a1 << 13)) ^ (a1 >>> 10);
++        w[i] = (w[i-16] + s0 + w[i-7] + s1) | 0; }
++      var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
++      for (i = 0; i < 64; i++) {
++        var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7)), ch = (e & f) ^ (~e & g);
++        var t1 = (h + S1 + ch + K[i] + w[i]) | 0, S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
++        var t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
++        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
++      }
++      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
++      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
++    }
++    var out = new Uint8Array(32); for (i = 0; i < 8; i++) { out[4*i] = H[i] >>> 24; out[4*i+1] = H[i] >>> 16 & 255; out[4*i+2] = H[i] >>> 8 & 255; out[4*i+3] = H[i] & 255; }
++    return out;
++  }
++  var SP_BOUNCE = "https://shellen.github.io/EO1/eo2/spotify/callback.html";
++  var SP_SCOPES = "user-read-recently-played user-read-currently-playing";
++  var SP_PREFIX = {grid: "spotify-grid-", anim: "spotify-grid-", now: "spotify-nowplaying-"};
++  function ls(k, v){ try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch(e) { return null; } }
++  function b64url(bytes){ var s = ""; for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
++  function spRedirect(){ return ls("spRedirect") || (location.protocol === "https:" ? location.origin + "/" : SP_BOUNCE); }
++  var spStyle = ls("spStyle") || "grid", spN = +(ls("spN") || 12), spBusy = false, spLastTrack = ls("spLastTrack") || "", spTimer = null;
++  function spSay(t){ $("spStatus").textContent = t; }
++  function spTokens(){ try { return JSON.parse(ls("spTokens") || "null"); } catch(e) { return null; } }
++  function spRender(){
++    var t = spTokens();
++    $("spSetup").hidden = !!t; $("spReady").hidden = !t;
++    $("spRedirectShow").textContent = spRedirect();
++    $("spClient").value = $("spClient").value || ls("spClient") || "";
++    Array.prototype.forEach.call(document.querySelectorAll("#spCard [data-sp]"), function(b){ b.classList.toggle("sel", b.dataset.sp === spStyle); });
++    Array.prototype.forEach.call(document.querySelectorAll("#spSizes .chip"), function(b){ b.classList.toggle("sel", +b.dataset.n === spN); });
++    $("spSizes").hidden = spStyle === "now";
++    $("spAutoRow").hidden = spStyle === "now"; $("spFollowRow").hidden = spStyle !== "now";
++    $("spGo").textContent = spStyle === "now" ? "Show what’s playing" : "Put it on the frame";
++    $("spAuto").checked = ls("spAuto") === "1"; $("spFollow").checked = ls("spFollow") === "1";
++  }
++  Array.prototype.forEach.call(document.querySelectorAll("#spCard [data-sp]"), function(b){ b.onclick = function(){ spStyle = b.dataset.sp; ls("spStyle", spStyle); spRender(); spFollowLoop(); }; });
++  Array.prototype.forEach.call(document.querySelectorAll("#spSizes .chip"), function(b){ b.onclick = function(){ spN = +b.dataset.n; ls("spN", String(spN)); spRender(); }; });
++  $("spAuto").onchange = function(){ ls("spAuto", this.checked ? "1" : "0"); };
++  $("spFollow").onchange = function(){ ls("spFollow", this.checked ? "1" : "0"); spFollowLoop(); };
++  $("spCopy").onclick = function(){
++    var t = spRedirect();
++    (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(t) : Promise.reject()).then(function(){ toast("Copied"); }, function(){
++      var r = document.createRange(); r.selectNodeContents($("spRedirectShow")); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
++      try { document.execCommand("copy"); toast("Copied"); } catch(e) { toast("Press and hold the address to copy it"); }
++    });
++  };
++  $("spRedirectEdit").onclick = function(){
++    var box = $("spRedirectShow"); box.contentEditable = "true"; box.focus(); toast("Edit the address, then tap Connect");
++    box.onblur = function(){ var v = box.textContent.trim(); ls("spRedirect", v && v !== SP_BOUNCE ? v : null); box.contentEditable = "false"; spRender(); };
++  };
++  $("spConnect").onclick = function(){
++    var id = $("spClient").value.trim();
++    if (!/^[0-9a-f]{32}$/i.test(id)) { toast("That doesn’t look like a Client ID (32 letters and numbers)"); return; }
++    ls("spClient", id);
++    var rnd = new Uint8Array(48); crypto.getRandomValues(rnd);
++    var verifier = b64url(rnd), nonce = b64url(rnd.subarray(0, 12));
++    ls("spVerifier", verifier); ls("spNonce", nonce);
++    var state = b64url(new TextEncoder().encode(JSON.stringify({f: location.origin, n: nonce})));
++    var u = "https://accounts.spotify.com/authorize?" + new URLSearchParams({
++      client_id: id, response_type: "code", redirect_uri: spRedirect(), scope: SP_SCOPES,
++      code_challenge_method: "S256", code_challenge: b64url(sha256(new TextEncoder().encode(verifier))), state: state
++    }).toString();
++    location.href = u;
++  };
++  $("spDisconnect").onclick = function(){
++    askConfirm("Disconnect Spotify on this phone?", "Disconnect").then(function(y){ if (!y) return; ls("spTokens", null); spRender(); toast("Disconnected"); });
++  };
++  function spTokenRequest(params){
++    return fetch("https://accounts.spotify.com/api/token", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: new URLSearchParams(params).toString()})
++      .then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error_description || j.error || ("Spotify said " + r.status)); return j; }); })
++      .then(function(j){
++        var old = spTokens() || {};
++        var t = {access: j.access_token, refresh: j.refresh_token || old.refresh, exp: Date.now() + (j.expires_in || 3600) * 1000};
++        ls("spTokens", JSON.stringify(t)); return t;
++      });
++  }
++  // Coming back from Spotify: ?code= (https origin) or #spotify_code= (via the bounce page).
++  function spHandleReturn(){
++    var q = new URLSearchParams(location.search), h = new URLSearchParams(location.hash.slice(1));
++    var code = h.get("spotify_code") || q.get("code"), state = h.get("spotify_state") || q.get("state"), err = h.get("spotify_error") || q.get("error");
++    if (!code && !err) return;
++    history.replaceState(null, "", location.pathname);
++    if (err) { toast("Spotify: " + (err === "access_denied" ? "you cancelled" : err), 4000); return; }
++    var st = {}; try { st = JSON.parse(atob(state.replace(/-/g, "+").replace(/_/g, "/"))); } catch(e) {}
++    if (!st.n || st.n !== ls("spNonce")) { toast("That Spotify login didn’t start on this phone — try Connect again", 4500); return; }
++    $("spCard").scrollIntoView({block: "center"});
++    spSay("Finishing the Spotify connection…");
++    spTokenRequest({grant_type: "authorization_code", code: code, redirect_uri: spRedirect(), client_id: ls("spClient"), code_verifier: ls("spVerifier")})
++      .then(function(){ ls("spVerifier", null); ls("spNonce", null); spRender(); spSay("Connected. Pick a style and put it on the frame."); toast("Spotify connected"); spWhoAmI(); })
++      .catch(function(e){ spSay("Couldn’t connect: " + e.message); });
++  }
++  function spToken(){
++    var t = spTokens(); if (!t) return Promise.reject(new Error("Not connected"));
++    if (t.exp - Date.now() > 60000) return Promise.resolve(t.access);
++    return spTokenRequest({grant_type: "refresh_token", refresh_token: t.refresh, client_id: ls("spClient")}).then(function(n){ return n.access; })
++      .catch(function(e){ ls("spTokens", null); spRender(); throw new Error("Spotify needs you to connect again (" + e.message + ")"); });
++  }
++  function spGet(path){
++    return spToken().then(function(tok){ return fetch("https://api.spotify.com/v1" + path, {headers: {Authorization: "Bearer " + tok}}); }).then(function(r){
++      if (r.status === 204) return null;
++      if (r.status === 403) throw new Error("Spotify refused. In the developer dashboard, open your app → User Management and add your Spotify account’s email.");
++      if (!r.ok) throw new Error("Spotify said " + r.status);
++      return r.json();
++    });
++  }
++  function spWhoAmI(){ spGet("/me").then(function(me){ if (me) $("spWho").textContent = "Connected as " + (me.display_name || me.id); }).catch(function(){}); }
++  function bigImage(images){ return (images || []).slice().sort(function(a, b){ return (b.width || 0) - (a.width || 0); })[0]; }
++  function spRecentAlbums(max){
++    return spGet("/me/player/recently-played?limit=50").then(function(j){
++      var seen = {}, out = [];
++      ((j && j.items) || []).forEach(function(it){
++        var al = it.track && it.track.album; if (!al || seen[al.id]) return; var img = bigImage(al.images); if (!img) return;
++        seen[al.id] = 1; out.push({name: al.name, artist: (al.artists || []).map(function(a){ return a.name; }).join(", "), url: img.url});
++      });
++      if (!out.length) throw new Error("Spotify has no recent plays for this account yet");
++      return out.slice(0, max);
++    });
++  }
++  function gridLayout(n){
++    var cols = n === 20 ? 4 : 3, rows = Math.ceil(n / cols), cell = Math.floor(W / cols), top = Math.floor((H - rows * cell) / 2);
++    return {cols: cols, rows: rows, cell: cell, top: top};
++  }
++  function drawGridChrome(ctx, L, albums){
++    ctx.fillStyle = "#0d0d0d"; ctx.fillRect(0, 0, W, H);
++    var d = new Date(), pad = 60;
++    ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "600 34px " + FONT; ctx.textBaseline = "alphabetic";
++    ctx.fillText("RECENTLY PLAYED", pad, L.top - 110);
++    ctx.fillStyle = "#fff"; ctx.font = "700 64px " + FONT;
++    ctx.fillText(d.toLocaleDateString(undefined, {weekday: "long", month: "long", day: "numeric"}), pad, L.top - 40);
++    var f = L.top + L.rows * L.cell;
++    ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "600 30px " + FONT; ctx.fillText("LATEST", pad, f + 70);
++    ctx.fillStyle = "#fff"; ctx.font = "600 40px " + FONT; wrapText(ctx, albums[0].name + " — " + albums[0].artist, pad, f + 122, W - pad * 2, 50, 2);
++  }
++  function cellXY(L, i){ return [(i % L.cols) * L.cell, L.top + Math.floor(i / L.cols) * L.cell]; }
++  function spGrid(n){
++    return spRecentAlbums(n).then(function(albums){
++      spSay("Getting album art…");
++      return Promise.all(albums.map(function(a){ return loadCover(a.url); })).then(function(imgs){
++        var L = gridLayout(n), c = document.createElement("canvas"); c.width = W; c.height = H; var ctx = c.getContext("2d");
++        drawGridChrome(ctx, L, albums);
++        imgs.forEach(function(im, i){ var p = cellXY(L, i); ctx.drawImage(im, p[0], p[1], L.cell, L.cell); });
++        return toJpeg(c);
++      });
++    });
++  }
++  // Animated: the grid, then one cover at a time cross-fades to an older album. Only one cell
++  // changes per frame, so the GIF stays small and the frame's old board plays it easily.
++  function spAnimated(n){
++    return spRecentAlbums(n * 2).then(function(albums){
++      spSay("Getting album art…");
++      return Promise.all(albums.map(function(a){ return loadCover(a.url); })).then(function(imgs){
++        return import(GIFENC).then(function(G){
++          var L = gridLayout(n), c = document.createElement("canvas"); c.width = W; c.height = H; var ctx = c.getContext("2d");
++          var shown = imgs.slice(0, n), spare = imgs.slice(n);
++          if (spare.length < 3) spare = spare.concat(imgs.slice(0, n).reverse());   // few albums: shuffle what there is
++          drawGridChrome(ctx, L, albums); shown.forEach(function(im, i){ var p = cellXY(L, i); ctx.drawImage(im, p[0], p[1], L.cell, L.cell); });
++          var base = ctx.getImageData(0, 0, W, H).data;
++          var gif = G.GIFEncoder(), prev = new Uint8ClampedArray(base);
++          var pal0 = G.quantize(base, 256);
++          gif.writeFrame(G.applyPalette(base, pal0), W, H, {palette: pal0, delay: 2500, repeat: 0, dispose: 1});
++          var order = []; for (var i = 0; i < n; i++) order.push(i); var r = rng32(+ymd(new Date()).replace(/-/g, ""));
++          for (i = order.length - 1; i > 0; i--) { var j = Math.floor(r() * (i + 1)), t = order[i]; order[i] = order[j]; order[j] = t; }
++          var swaps = Math.min(spare.length, 12), k = 0, step = 0, STEPS = 4, cs = L.cell;
++          // Each frame only touches one cell, so it gets its own palette built from that cell:
++          // every cover keeps its true colors, and everything outside the cell is transparent.
++          function frame(){
++            if (k >= swaps) { gif.finish(); return new Blob([gif.bytes()], {type: "image/gif"}); }
++            var slot = order[k % order.length], p = cellXY(L, slot), from = shown[slot], to = spare[k];
++            step++;
++            ctx.globalAlpha = 1; ctx.drawImage(from, p[0], p[1], cs, cs);
++            ctx.globalAlpha = step / STEPS; ctx.drawImage(to, p[0], p[1], cs, cs); ctx.globalAlpha = 1;
++            var cell = ctx.getImageData(p[0], p[1], cs, cs).data;
++            var pal = G.quantize(cell, 255); pal.push([0, 0, 0]); var T = pal.length - 1;
++            var cidx = G.applyPalette(cell, pal), out = new Uint8Array(W * H).fill(T);
++            for (var yy = 0; yy < cs; yy++) for (var xx = 0; xx < cs; xx++) {
++              var ci = yy * cs + xx, fi = (p[1] + yy) * W + p[0] + xx, c4 = ci * 4, f4 = fi * 4;
++              if (cell[c4] !== prev[f4] || cell[c4 + 1] !== prev[f4 + 1] || cell[c4 + 2] !== prev[f4 + 2]) {
++                out[fi] = cidx[ci]; prev[f4] = cell[c4]; prev[f4 + 1] = cell[c4 + 1]; prev[f4 + 2] = cell[c4 + 2];
++              }
++            }
++            gif.writeFrame(out, W, H, {palette: pal, delay: step === STEPS ? 2200 : 70, transparent: true, transparentIndex: T, dispose: 1});
++            if (step === STEPS) { shown[slot] = to; step = 0; k++; spSay("Making the animation… " + Math.round(k / swaps * 100) + "%"); }
++            return new Promise(function(res){ setTimeout(res, 0); }).then(frame);
++          }
++          return frame();
++        });
++      });
++    });
++  }
++  function spNowPlayingTrack(){
++    return spGet("/me/player/currently-playing").then(function(j){
++      if (!j || !j.item || j.currently_playing_type !== "track") return null;
++      var tr = j.item, al = tr.album || {}, img = bigImage(al.images);
++      return {id: tr.id, title: tr.name, artist: (tr.artists || []).map(function(a){ return a.name; }).join(", "), album: al.name, url: img && img.url, playing: j.is_playing};
++    });
++  }
++  function spNowPoster(t){
++    return loadCover(t.url).then(function(im){
++      var c = document.createElement("canvas"); c.width = W; c.height = H; var ctx = c.getContext("2d");
++      softBackdrop(ctx, im, im.naturalWidth, im.naturalHeight, 0.5);
++      var size = 880, x = (W - size) / 2, y = 300;
++      ctx.save(); ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = 60; ctx.shadowOffsetY = 24; ctx.drawImage(im, x, y, size, size); ctx.restore();
++      var pad = 100, ty = y + size + 130;
++      ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.font = "600 30px " + FONT; ctx.fillText("NOW PLAYING", pad, y - 50);
++      ctx.fillStyle = "#fff"; ctx.font = "700 66px " + FONT; var lines = wrapText(ctx, t.title, pad, ty, W - pad * 2, 78, 2);
++      ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.font = "500 44px " + FONT; wrapText(ctx, t.artist, pad, ty + lines * 78 + 20, W - pad * 2, 54, 1);
++      ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "400 34px " + FONT; wrapText(ctx, t.album, pad, ty + lines * 78 + 84, W - pad * 2, 42, 1);
++      return toJpeg(c);
++    });
++  }
++  function spRun(quiet){
++    if (spBusy) return Promise.resolve(); spBusy = true; $("spGo").disabled = true;
++    var style = spStyle, n = spN, today = ymd(new Date()), job;
++    spSay(style === "now" ? "Checking what’s playing…" : "Getting your recent plays…");
++    if (style === "now") {
++      job = spNowPlayingTrack().then(function(t){
++        if (!t) { spSay("Nothing is playing on Spotify right now."); return; }
++        var name = SP_PREFIX.now + t.id + ".jpg";
++        if (t.id === spLastTrack && files.some(function(f){ return f.name === name; })) { spSay("Showing: " + t.title + " — " + t.artist); return; }
++        spSay("Making the poster…");
++        return spNowPoster(t).then(function(blob){ return replaceOnFrame(blob, name, SP_PREFIX.now, spSay, true); })
++          .then(function(){ spLastTrack = t.id; ls("spLastTrack", t.id); spSay("Showing: " + t.title + " — " + t.artist); if (!quiet) toast("On the frame now"); });
++      });
++    } else {
++      var name = SP_PREFIX.grid + today + "-" + n + (style === "anim" ? ".gif" : ".jpg");
++      job = (style === "anim" ? spAnimated(n) : spGrid(n)).then(function(blob){
++        return replaceOnFrame(blob, name, SP_PREFIX.grid, spSay, !quiet);
++      }).then(function(){ ls("spLastGrid", String(Date.now())); spSay("Done — your albums are on the frame."); if (!quiet) toast("Albums added"); });
++    }
++    return job.catch(function(e){ spSay("Couldn’t do it: " + e.message); })
++      .then(function(){ spBusy = false; $("spGo").disabled = false; });
++  }
++  $("spGo").onclick = function(){ spRun(false); };
++  function spFollowLoop(){
++    clearInterval(spTimer); spTimer = null;
++    if (spStyle === "now" && ls("spFollow") === "1" && spTokens()) { spTimer = setInterval(function(){ if (!document.hidden) spRun(true); }, 30000); }
++  }
++  function maybeAutoSpotify(){
++    if (!spTokens()) return;
++    if (spStyle === "now") { if (ls("spFollow") === "1") spRun(true); return; }
++    if (ls("spAuto") !== "1") return;
++    if (Date.now() - (+(ls("spLastGrid") || 0)) < 3 * 3600 * 1000) return;   // at most every 3 hours
++    spRun(true);
++  }
++  spRender(); spHandleReturn(); if (spTokens()) spWhoAmI(); spFollowLoop();
++
 +  // ---------- go ----------
-+  refreshFiles().then(refreshState).then(maybeAutoFrontPage);
++  refreshFiles().then(refreshState).then(maybeAutoFrontPage).then(maybeAutoSpotify);
 +  setInterval(refreshState, 15000);
 +  document.addEventListener("visibilitychange", function(){ if (!document.hidden) { refreshFiles(); refreshState(); } });
 +})();

@@ -18,6 +18,12 @@
 - `/thumb/<name>`: cached ~270x480 JPEG thumbnails for the gallery (beside `uploaded/` in
   `files/thumbs`), loaded by an IntersectionObserver.
 - `POST /settings` also accepts `name` (the frame's display name).
+- **Extras → Spotify**: album grid (9/12/20), animated grid (one cover at a time cross-fades,
+  per-frame palettes, ~0.8 MB) and a now-playing poster that goes on screen immediately, with
+  optional follow-along. OAuth PKCE in the browser (bundled SHA-256, since the http page has no
+  `crypto.subtle`); logins return via `eo2/spotify/callback.html` on GitHub Pages, or directly
+  when the page is served over https (Tailscale Serve). See `../SPOTIFY-AND-TAILSCALE.md`.
+- "Whole photo" uses a scaled-down/up blur, since Safari's canvas has no `ctx.filter`.
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin
   checked, like uploads). Clears the legacy quiet-hour mirror so "off" sticks.
