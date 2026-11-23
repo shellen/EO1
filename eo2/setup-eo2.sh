@@ -51,7 +51,7 @@ pick_apk() {
     printf '%s\n' "$list" | sed -n "${choice:-1}p"
 }
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "$WORK"; [ -n "${TARGET:-}" ] && adb disconnect "$TARGET" >/dev/null 2>&1' EXIT
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 ok()    { printf '  \033[32m✓\033[0m %s\n' "$*"; }

@@ -6,6 +6,11 @@ From 2.0.7 on, the easiest way: on the phone page, **Settings → Update the fra
 The frame only accepts APKs signed with your key that are newer than what's installed, then
 installs it itself. The script below still works and is the fallback.
 
+If the page says the update is **waiting** and the frame's installer is busy: the frame installs
+through its own adb connection, and that is blocked while a computer is still attached to the
+frame over adb. On the computer run `adb kill-server` (the scripts here now disconnect by
+themselves when they finish), or reboot the frame, then tap **Install**.
+
 Put the new APK next to `update-eo2.sh` and run `bash update-eo2.sh FRAME_IP`. It updates in
 place, or, if the new build is signed with a different key, backs up your photos and settings,
 reinstalls, and restores them. The phone page lives at `http://FRAME_IP:8080/`; the original

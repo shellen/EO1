@@ -60,6 +60,9 @@
   the installed app's certificate with a higher versionCode; the page then asks the frame to install
   it (`install-staged`, which on an EO2 goes through the frame's own adbd). Build with increasing
   `-PVERSION_CODE` (e.g. 2.0.7 → 20007).
+  A staged update that has not installed shows as a "waiting" row with the reason and an Install
+  retry. `BuildFacts.RELEASE_CERT_SHA256` is set to this project's release key, so the build line
+  reads "matches the release key"; change it if you sign with your own key.
 - **Layout**: four tabs (Now, Library, Extras, Frame) with a flat style (Familjen Grotesk
   headings, monospace labels, hairlines, one accent; fonts bundled and served from `/fonts/`, SIL
   Open Font License). An optional hand-drawn style (Shantell Sans, wobbly borders, squiggle

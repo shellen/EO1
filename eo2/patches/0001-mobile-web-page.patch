@@ -57,6 +57,19 @@ index ca8ed02..19fbb6c 100644
      public boolean raiseMinimumBrightnessStep(String via) {
          final int base = steppedBase();
          this.minimumBrightnessStep = base >= MAX_STEP ? MIN_STEP : base + 1;
+diff --git a/app/src/main/java/com/aphex3k/eo1/BuildFacts.java b/app/src/main/java/com/aphex3k/eo1/BuildFacts.java
+index 7e10130..79d58a7 100644
+--- a/app/src/main/java/com/aphex3k/eo1/BuildFacts.java
++++ b/app/src/main/java/com/aphex3k/eo1/BuildFacts.java
+@@ -37,7 +37,7 @@ public final class BuildFacts {
+      * than the keystore alone, so the value cannot drift from what actually signed a release.
+      */
+     public static final String RELEASE_CERT_SHA256 =
+-            "a7cfbdda28c93aa270502b38e0da5f5bd1836e3a243f8cb270a9a17fcdd7deb8";
++            "47d2d2778bb9047ca8ee360e70deed2195c1e44d64f5f67d23f018727764ba94";
+ 
+     private static final String UNKNOWN = "unknown";
+ 
 diff --git a/app/src/main/java/com/aphex3k/eo1/GeneratedFilesJanitor.java b/app/src/main/java/com/aphex3k/eo1/GeneratedFilesJanitor.java
 new file mode 100644
 index 0000000..6911fb3
@@ -6352,10 +6365,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..a1da434
+index 0000000..3ec066b
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1672 @@
+@@ -0,0 +1,1699 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -6831,6 +6844,7 @@ index 0000000..a1da434
 +  <div class="sectionhead"><h2>Maintenance</h2></div>
 +  <div class="list">
 +    <div class="mrow"><span><b>Update the frame</b><small id="updStatus">Install a newer APK from this phone</small></span><button class="btn small" id="updPick">Choose APK…</button></div>
++    <div class="mrow" id="updStagedRow" hidden><span><b id="updStagedTitle">Update waiting</b><small id="updStagedWhy"></small></span><button class="btn small go" id="updInstall">Install</button></div>
 +    <input type="file" id="updFile" accept=".apk,application/vnd.android.package-archive" hidden>
 +    <div class="mrow"><span><b>Restart the app</b><small>Fixes a stuck picture. Takes a few seconds</small></span><button class="btn small" id="mRestart">Restart</button></div>
 +    <div class="mrow"><span><b>Reboot the frame</b><small>A full restart. Back in about a minute</small></span><button class="btn small danger" id="mReboot">Reboot</button></div>
@@ -6974,7 +6988,7 @@ index 0000000..a1da434
 +    $("btnScreen").setAttribute("aria-label", on ? "Turn the screen off" : "Turn the screen on");
 +    $("brightRow").hidden = br.supported === false;
 +    if (typeof br.step === "number" && !brightDragging && Date.now() - brightSetAt > 4000) { $("bright").value = br.step + 1; $("brightLabel").textContent = (br.step + 1) + "/8"; brightFill(); }
-+    renderInfo(s);
++    renderInfo(s); renderUpdate(s);
 +    var cur = media.current || {};
 +    var curName = cur.originalFileName || (cur.key ? String(cur.key).split(/[\/:]/).pop() : "");
 +    $("nowName").textContent = friendlyName(curName) || (on ? "—" : "Sleeping");
@@ -7946,6 +7960,32 @@ index 0000000..a1da434
 +  };
 +
 +  // ---------- update the frame from the phone ----------
++  // What the frame says about a staged update, in plain words. The frame installs through its own
++  // adb connection, which a computer that is still attached over adb blocks.
++  var updBusy = false;
++  function updWhy(u){
++    if (u.state === "INSTALL_PENDING") return "Installing now. The frame restarts when it’s done.";
++    if (u.adbdReachable === false || u.installMode === "intent" || u.installMode === "defer-to-human" || u.needsHumanConfirmation)
++      return "The frame’s installer is busy or unreachable. If a computer has used adb with this frame, run “adb kill-server” on it (or reboot the frame), then tap Install.";
++    if (u.lastError) return "Last try: " + u.lastError + ". Tap Install to try again.";
++    return "Downloaded and checked. Tap Install.";
++  }
++  function renderUpdate(s){
++    var u = (s && s.update) || {}, waiting = u.state === "STAGED" || u.state === "INSTALL_PENDING";
++    $("updStagedRow").hidden = !waiting;
++    if (!waiting) return;
++    $("updStagedTitle").textContent = (u.expectedVersionName ? "Version " + u.expectedVersionName : "An update") + (u.state === "STAGED" ? " is waiting" : " is installing");
++    $("updStagedWhy").textContent = updWhy(u);
++    $("updInstall").hidden = u.state !== "STAGED";
++  }
++  $("updInstall").onclick = function(){
++    $("updInstall").disabled = true;
++    api("/control?action=install-staged").catch(function(){}).then(function(){
++      toast("Asked the frame to install it", 3000);
++      setTimeout(function(){ $("updInstall").disabled = false; refreshState(); }, 8000);
++    });
++  };
++
 +  $("updPick").onclick = function(){ $("updFile").click(); };
 +  function updSay(t){ $("updStatus").textContent = t; }
 +  $("updFile").onchange = function(){
@@ -7976,8 +8016,8 @@ index 0000000..a1da434
 +            var v = s2 && s2.app && s2.app.versionName;
 +            if (v && v !== before) { updSay("Updated to " + v + "."); toast("Frame updated to " + v); $("updPick").disabled = false; refreshState(); return; }
 +            var u = s2 && s2.update;
-+            if (u && u.needsHumanConfirmation) { updSay("The frame couldn’t install it by itself (" + (u.installMode || "") + "). Use the update script instead."); $("updPick").disabled = false; return; }
-+            if (Date.now() - t0 > 240000) { updSay("Still on " + (v || before) + ". " + ((u && u.lastError) ? "Last error: " + u.lastError : "Check Advanced → state.")); $("updPick").disabled = false; return; }
++            if (u && u.state === "STAGED" && Date.now() - t0 > 45000) { updSay("Uploaded, but not installed yet. See below."); $("updPick").disabled = false; renderUpdate(s2); return; }
++            if (Date.now() - t0 > 240000) { updSay("Still on " + (v || before) + "."); $("updPick").disabled = false; renderUpdate(s2); return; }
 +            setTimeout(poll, 5000);
 +          }).catch(function(){ setTimeout(poll, 5000); });   // the frame is restarting
 +        })();

@@ -64,6 +64,9 @@ echo "  Connecting to ${T}…"
 frame_connect "$T" || die "Couldn't reach the frame at $T after ~20 seconds.
   Check it's powered on and on Wi-Fi (its IP may have changed), then try again."
 A() { adb -s "$T" "$@"; }
+# Always let go of the frame when this script ends, however it ends: the frame's own installer
+# (used by the phone page's "Update the frame") cannot run while a computer stays attached.
+trap 'adb disconnect "$T" >/dev/null 2>&1' EXIT
 ok "Connected to $(A shell getprop ro.product.model | tr -d '\r') at $IP"
 
 OUT="$(A install -r "$APK" 2>&1)"
