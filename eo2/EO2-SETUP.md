@@ -2,6 +2,10 @@
 
 ## Updating to a newer build
 
+From 2.0.7 on, the easiest way: on the phone page, **Settings → Update the frame → Choose APK…**.
+The frame only accepts APKs signed with your key that are newer than what's installed, then
+installs it itself. The script below still works and is the fallback.
+
 Put the new APK next to `update-eo2.sh` and run `bash update-eo2.sh FRAME_IP`. It updates in
 place, or, if the new build is signed with a different key, backs up your photos and settings,
 reinstalls, and restores them. The phone page lives at `http://FRAME_IP:8080/`; the original

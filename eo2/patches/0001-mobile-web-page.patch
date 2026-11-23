@@ -1309,10 +1309,10 @@ index 251f2a9..80ba7a3 100644
       * One-line identity of the running build (version, variant, source commit, signing-key verdict)
       * for the page header. The certificate's own facts are only in {@code /state}: the server holds
 diff --git a/app/src/main/java/com/aphex3k/eo1/WebServer.java b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-index f6cbeb4..3d0694d 100644
+index f6cbeb4..2c6b9a2 100644
 --- a/app/src/main/java/com/aphex3k/eo1/WebServer.java
 +++ b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-@@ -259,6 +259,39 @@ public class WebServer {
+@@ -259,6 +259,42 @@ public class WebServer {
          if (path.equals("/") || path.equals("/index.html")) {
              return "index";
          }
@@ -1321,6 +1321,9 @@ index f6cbeb4..3d0694d 100644
 +        }
 +        if (path.equals("/icon.png")) {
 +            return "icon";
++        }
++        if (path.equals("/update/apk")) {
++            return "phoneUpdate";
 +        }
 +        if (path.equals("/queue")) {
 +            return "queue";
@@ -1352,7 +1355,7 @@ index f6cbeb4..3d0694d 100644
          if (path.equals("/state")) {
              return "state";
          }
-@@ -522,6 +555,15 @@ public class WebServer {
+@@ -522,6 +558,15 @@ public class WebServer {
  
          switch (routeKey) {
              case "index":
@@ -1368,7 +1371,7 @@ index f6cbeb4..3d0694d 100644
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
                      return;
-@@ -529,6 +571,135 @@ public class WebServer {
+@@ -529,6 +574,135 @@ public class WebServer {
                  send(os, 200, "text/html; charset=utf-8", renderIndex());
                  break;
  
@@ -1504,7 +1507,7 @@ index f6cbeb4..3d0694d 100644
              case "state":
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
-@@ -591,6 +762,7 @@ public class WebServer {
+@@ -591,6 +765,7 @@ public class WebServer {
                  }
                  String name = urlDecode(decodePathSegment(path, "/delete"));
                  boolean ok = controller.deleteUploadedFile(name);
@@ -1512,7 +1515,30 @@ index f6cbeb4..3d0694d 100644
                  sendJson(os, ok ? 200 : 404, ok ? okJson("deleted") : errorJson("not found"));
                  break;
              }
-@@ -905,6 +1077,14 @@ public class WebServer {
+@@ -735,6 +910,22 @@ public class WebServer {
+                 handleUpload(headers, is, os);
+                 break;
+ 
++            // The phone page's "Update the frame": no Trusted Network token, because the upload is
++            // only staged when it is signed by the same certificate as the installed app and has a
++            // newer versionCode (UpdateManager.stageUploadedApk); same-origin is still required.
++            case "phoneUpdate": {
++                if (!method.equals("POST")) {
++                    send(os, 405, "text/plain", "method not allowed");
++                    return;
++                }
++                if (!configWriteAllowed(headers, boundPort)) {
++                    sendJson(os, 403, errorJson("cross-origin request rejected"));
++                    return;
++                }
++                handleUpdateUpload(headers, is, os);
++                break;
++            }
++
+             case "update": {
+                 if (!method.equals("POST")) {
+                     send(os, 405, "text/plain", "method not allowed");
+@@ -905,6 +1096,14 @@ public class WebServer {
              sendJson(os, 500, errorJson("cannot create upload dir"));
              return;
          }
@@ -1527,7 +1553,7 @@ index f6cbeb4..3d0694d 100644
          // Unique per-request temp dir so parallel uploads cannot collide on part names or
          // clean each other's in-progress uploads.
          File incoming = new File(uploadDir, "incoming_" + System.nanoTime());
-@@ -941,6 +1121,11 @@ public class WebServer {
+@@ -941,6 +1140,11 @@ public class WebServer {
                  }
              }
  
@@ -1539,7 +1565,7 @@ index f6cbeb4..3d0694d 100644
              JsonObject o = new JsonObject();
              o.addProperty("ok", true);
              JsonArray arr = new JsonArray();
-@@ -1031,6 +1216,165 @@ public class WebServer {
+@@ -1031,6 +1235,165 @@ public class WebServer {
       * {@code POST /config/import}). The body is read off the socket with a hard cap before the
       * controller touches it.
       */
@@ -1705,7 +1731,7 @@ index f6cbeb4..3d0694d 100644
      private void handleConfigPost(Map<String, String> headers, InputStream is, OutputStream os)
              throws IOException {
          long declared = parseLongLenient(headers.get("content-length"));
-@@ -1208,6 +1552,136 @@ public class WebServer {
+@@ -1208,6 +1571,136 @@ public class WebServer {
  
      // --- rendering ---
  
@@ -1842,7 +1868,7 @@ index f6cbeb4..3d0694d 100644
      private String renderIndex() {
          File dir = controller.uploadedDir();
          UploadedMedia.FileInfo[] files = controller.listUploadedFiles();
-@@ -1232,6 +1706,7 @@ public class WebServer {
+@@ -1232,6 +1725,7 @@ public class WebServer {
              sb.append("<p><small>").append(escapeHtml(termsNotice)).append("</small></p>");
          }
          sb.append("<p>").append(escapeHtml(controller.appBuildSummary())).append("</p>");
@@ -1850,7 +1876,7 @@ index f6cbeb4..3d0694d 100644
          sb.append("<p><a href=\"/state\">state</a> · <a href=\"/logs\">logs</a> · ")
                  .append("<a href=\"/crashes\">crashes</a> · ")
                  .append("<a href=\"/reports\">reports</a> · ")
-@@ -2156,6 +2631,7 @@ public class WebServer {
+@@ -2156,6 +2650,7 @@ public class WebServer {
              o.addProperty("name", f.name);
              o.addProperty("size", f.size);
              o.addProperty("lastModified", f.lastModified);
@@ -3655,10 +3681,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..3aabdfb
+index 0000000..6abebf7
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1447 @@
+@@ -0,0 +1,1493 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -3954,6 +3980,11 @@ index 0000000..3aabdfb
 +  <div class="setrow">
 +    <div class="setlabel">About this frame</div>
 +    <dl class="info" id="info"></dl>
++  </div>
++  <div class="setrow">
++    <div class="setlabel">Update the frame</div>
++    <div class="namerow"><button class="btn small" id="updPick">Choose APK…</button><span class="artname" id="updStatus" style="align-self:center"></span></div>
++    <input type="file" id="updFile" accept=".apk,application/vnd.android.package-archive" hidden>
 +  </div>
 +</div>
 +
@@ -5095,6 +5126,47 @@ index 0000000..3aabdfb
 +    toJpeg(c).then(function(blob){
 +      return uploadBlob(blob, "art-" + ($("artName").textContent || "art").toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + artSeed.toString(36) + ".jpg");
 +    }).then(function(){ toast("Kept — it’s in your rotation"); refreshFiles(); }).catch(function(){ toast("Couldn’t save it"); });
++  };
++
++  // ---------- update the frame from the phone ----------
++  $("updPick").onclick = function(){ $("updFile").click(); };
++  function updSay(t){ $("updStatus").textContent = t; }
++  $("updFile").onchange = function(){
++    var f = this.files && this.files[0]; this.value = "";
++    if (!f) return;
++    if (!/\.apk$/i.test(f.name)) { toast("Pick the frame’s .apk file"); return; }
++    var before = (state && state.app && state.app.versionName) || "";
++    updSay("Sending… 0%"); $("updPick").disabled = true;
++    var fd = new FormData(); fd.append("file", f, f.name);
++    var x = new XMLHttpRequest(); x.open("POST", "/update/apk");
++    x.upload.onprogress = function(e){ if (e.lengthComputable) updSay("Sending… " + Math.round(100 * e.loaded / e.total) + "%"); };
++    x.onerror = function(){ updSay("Couldn’t reach the frame"); $("updPick").disabled = false; };
++    x.onload = function(){
++      var j = {}; try { j = JSON.parse(x.responseText); } catch (e) {}
++      if (!j.ok) {
++        var r = String(j.reason || j.msg || j.error || x.status);
++        var why = /not-newer/.test(r) ? "That APK isn’t newer than what’s installed." :
++                  /signature|signer|cert/i.test(r) ? "That APK isn’t signed with this frame’s key." :
++                  /install-in-flight/.test(r) ? "An update is already installing." : "The frame refused it (" + r + ").";
++        updSay(why); $("updPick").disabled = false; return;
++      }
++      updSay("Checked and staged. Installing…");
++      api("/control?action=install-staged").catch(function(){}).then(function(){
++        updSay("Installing… the frame restarts in about a minute.");
++        var t0 = Date.now();
++        (function poll(){
++          api("/state").then(function(s2){
++            var v = s2 && s2.app && s2.app.versionName;
++            if (v && v !== before) { updSay("Updated to " + v + "."); toast("Frame updated to " + v); $("updPick").disabled = false; refreshState(); return; }
++            var u = s2 && s2.update;
++            if (u && u.needsHumanConfirmation) { updSay("The frame couldn’t install it by itself (" + (u.installMode || "") + "). Use the update script instead."); $("updPick").disabled = false; return; }
++            if (Date.now() - t0 > 240000) { updSay("Still on " + (v || before) + ". " + ((u && u.lastError) ? "Last error: " + u.lastError : "Check Advanced → state.")); $("updPick").disabled = false; return; }
++            setTimeout(poll, 5000);
++          }).catch(function(){ setTimeout(poll, 5000); });   // the frame is restarting
++        })();
++      });
++    };
++    x.send(fd);
 +  };
 +
 +  // ---------- go ----------

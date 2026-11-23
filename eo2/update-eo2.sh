@@ -108,9 +108,11 @@ echo "  Rebooting the frame…"
 for i in $(seq 1 36); do
     sleep 5
     if curl -fs -m 3 -o /dev/null "http://${IP}:8080/"; then
+        adb disconnect "$T" >/dev/null 2>&1   # don't leave a stale session that can wedge the frame's adb
         printf '\n\033[1mDone!\033[0m Open http://%s:8080/ on your phone.\n\n' "$IP"
         open "http://${IP}:8080/" 2>/dev/null || true
         exit 0
     fi
 done
+adb disconnect "$T" >/dev/null 2>&1
 printf '\nInstalled. The page hasn'"'"'t answered yet — try http://%s:8080/ in a minute.\n' "$IP"

@@ -51,6 +51,11 @@
   (with kind: photo, kept art, NYT, Spotify, live art, live music), the interval, the next change
   time and the music take-over status. The phone page shows it as a carousel with times, and the
   library as one horizontal row per source.
+- **Update from the phone**: `POST /update/apk` (same-origin only, no Trusted Network token)
+  stages an uploaded APK through `UpdateManager.stageUploadedApk`, which only accepts APKs signed by
+  the installed app's certificate with a higher versionCode; the page then asks the frame to install
+  it (`install-staged`, which on an EO2 goes through the frame's own adbd). Build with increasing
+  `-PVERSION_CODE` (e.g. 2.0.7 → 20007).
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin
   checked, like uploads). Clears the legacy quiet-hour mirror so "off" sticks.
@@ -69,5 +74,5 @@ Add to `local.properties`: `sdk.dir=...` and the `eo1.signing.*` keys pointing a
 keystore (keep using the same keystore so `update-eo2.sh` can update in place), then:
 
 ```bash
-./gradlew assembleRelease
+./gradlew assembleRelease -PVERSION_NAME=2.0.7 -PVERSION_CODE=20007
 ```
