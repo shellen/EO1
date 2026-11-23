@@ -56,9 +56,10 @@
   the installed app's certificate with a higher versionCode; the page then asks the frame to install
   it (`install-staged`, which on an EO2 goes through the frame's own adbd). Build with increasing
   `-PVERSION_CODE` (e.g. 2.0.7 → 20007).
-- **Layout**: four tabs (Now, Library, Extras, Frame) with a flat, hand-drawn style (bundled
-  Shantell Sans from `/fonts/`, SIL Open Font License, wobbly pen-stroke borders and squiggle
-  rules in plain CSS, one accent). Each extra is one row with its own
+- **Layout**: four tabs (Now, Library, Extras, Frame) with a flat style (Familjen Grotesk
+  headings, monospace labels, hairlines, one accent; fonts bundled and served from `/fonts/`, SIL
+  Open Font License). An optional hand-drawn style (Shantell Sans, wobbly borders, squiggle
+  rules; `body.sketch`) is a per-phone switch under Frame → Maintenance, off by default. Each extra is one row with its own
   switch and expands for options. Frame → Maintenance has Update, Restart the app
   (`POST /control?action=restart-app`) and Reboot (`POST /control?action=reboot`, via the frame's
   adbd), both using the watchdog's existing routines.

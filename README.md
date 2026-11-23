@@ -105,8 +105,9 @@ updates install in place.
   Immich, Flickr, quiet hours, its TLS work for Android 4.4, and much more).
 - **[spalt/EO1](https://github.com/spalt/EO1)** and **Dan Finkelstein**: the original replacement
   APK that started the revival, and the history of this repo.
-- [Shantell Sans](https://github.com/arrowtype/shantell-sans) (SIL Open Font License) is the phone
-  page's typeface, bundled with the app.
+- [Familjen Grotesk](https://github.com/Familjen-Sthlm/Familjen-Grotesk) (headings) and
+  [Shantell Sans](https://github.com/arrowtype/shantell-sans) (the optional hand-drawn style) are
+  bundled with the app under the SIL Open Font License.
 - [pdf.js](https://mozilla.github.io/pdf.js/) and [gifenc](https://github.com/mattdesl/gifenc)
   are loaded by the phone page for the front page and the GIFs.
 
