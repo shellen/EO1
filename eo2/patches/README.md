@@ -28,6 +28,10 @@
   frame's Android 4.4 WebView, rendered at 540x960 and scaled). `?style=`, `?styles=a,b`, `?seed=`.
   Turning art on adds `web` backend entries (`art-1`…`art-N`) pointing at it, so each appearance
   is a fresh piece.
+  **Keep this one** uploads a snapshot named `art-<style>-<seed, base 36>.jpg`; that file is only
+  the record and thumbnail. The frame never shows the still: for each record it adds an
+  `art-keep-<style>-<seed>` web entry that replays the same style and seed, re-derived whenever a
+  record is added or removed.
 - **Show on the frame**: `wall-sources.json` beside `uploaded/` switches photos / art / NYT /
   Spotify; the local backend skips switched-off kinds by file-name prefix. `GET /settings` returns
   it; `POST /settings {"sources": {...}}` saves it and rebuilds the rotation. Unit-tested in

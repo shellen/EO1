@@ -186,7 +186,7 @@ index 0000000..6911fb3
 +    }
 +}
 diff --git a/app/src/main/java/com/aphex3k/eo1/MainActivity.java b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
-index b12c5a6..6ce90c2 100644
+index b12c5a6..a92636e 100644
 --- a/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 +++ b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 @@ -846,6 +846,7 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
@@ -237,7 +237,7 @@ index b12c5a6..6ce90c2 100644
      @Override
      public void showNextImage() {
          if (this.brightnessManager.getShouldTheScreenBeOn()) {
-@@ -5528,6 +5562,63 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -5528,6 +5562,67 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
          return o;
      }
  
@@ -282,6 +282,10 @@ index b12c5a6..6ce90c2 100644
 +        String b = a.backendId == null ? "" : a.backendId;
 +        if (b.equals(WallSources.MUSIC_ID)) {
 +            kind = "music";
++        } else if (b.startsWith(WallSources.ART_ID_PREFIX + "keep-")) {
++            kind = "art";
++            // the kept piece's record file doubles as its thumbnail on the phone page
++            i.addProperty("name", "art-" + b.substring((WallSources.ART_ID_PREFIX + "keep-").length()) + ".jpg");
 +        } else if (b.startsWith(WallSources.ART_ID_PREFIX)) {
 +            kind = "art-live";
 +        } else if (a.type == MediaType.WEB) {
@@ -301,7 +305,7 @@ index b12c5a6..6ce90c2 100644
      @Override
      public String buildStateJson() {
          JsonObject o = new JsonObject();
-@@ -6218,6 +6309,26 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -6218,6 +6313,26 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
              }
              return sendKeyCode(keyCode);
          }
@@ -328,7 +332,7 @@ index b12c5a6..6ce90c2 100644
          if ("watchdog".equals(action)) {
              // Debug builds only: rungs escalate over hours on real hardware, and the whole point of
              // the ladder is that nobody has to be there when it fires. level 1..5 forces one.
-@@ -6249,10 +6360,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -6249,10 +6364,14 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
                  // Debug-only: "the clip that misbehaves is #600 of 1000", which ?action=next cannot
                  // promise to reach. Checked and parked from this thread, which may read the pool's
                  // key set but never its records; the rotation worker picks the record up.
@@ -336,7 +340,8 @@ index b12c5a6..6ce90c2 100644
 +                final String assetKey = params != null ? params.get("asset") : null;
 +                // Release builds allow pinning an uploaded file (the phone page's "Show now");
 +                // any other backend's asset stays debug-only.
-+                boolean localAsset = assetKey != null && assetKey.startsWith("local:");
++                boolean localAsset = assetKey != null
++                        && (assetKey.startsWith("local:") || assetKey.startsWith(WallSources.ART_ID_PREFIX));
 +                if ((!BuildConfig.DEBUG && !localAsset) || mediaManager == null) {
                      return false;
                  }
@@ -344,7 +349,7 @@ index b12c5a6..6ce90c2 100644
                  if (!mediaManager.queueAssetDisplay(assetKey)) {
                      return false;
                  }
-@@ -6270,9 +6384,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -6270,9 +6389,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
              case "screen":
                  task = this::toggleScreenOn;
                  break;
@@ -1145,10 +1150,10 @@ index 0000000..3ac471c
 +}
 diff --git a/app/src/main/java/com/aphex3k/eo1/WallSources.java b/app/src/main/java/com/aphex3k/eo1/WallSources.java
 new file mode 100644
-index 0000000..2293135
+index 0000000..e58e669
 --- /dev/null
 +++ b/app/src/main/java/com/aphex3k/eo1/WallSources.java
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,230 @@
 +package com.aphex3k.eo1;
 +
 +import com.google.gson.JsonObject;
@@ -1213,9 +1218,67 @@ index 0000000..2293135
 +            return spotify;
 +        }
 +        if ("art".equals(k)) {
-+            return art;
++            // A kept art file is only the record (and thumbnail) of a kept piece. The frame replays
++            // the piece live through a web entry instead, so the still itself is never shown.
++            return false;
 +        }
 +        return photos;
++    }
++
++    /** A kept piece: which style and seed to replay, parsed from its record file's name. */
++    public static final class KeptArt {
++        public final String style;
++        public final long seed;
++        public final String fileName;
++
++        KeptArt(String style, long seed, String fileName) {
++            this.style = style;
++            this.seed = seed;
++            this.fileName = fileName;
++        }
++
++        public String backendId() {
++            return ART_ID_PREFIX + "keep-" + style + "-" + Long.toString(seed, 36);
++        }
++
++        public String url(int port) {
++            return "http://127.0.0.1:" + port + "/art/?style=" + style + "&seed=" + seed;
++        }
++    }
++
++    private static final java.util.regex.Pattern KEPT_NAME =
++            java.util.regex.Pattern.compile("^art-([a-z0-9]+(?:-[a-z0-9]+)*)-([a-z0-9]{1,8})\\.jpe?g$");
++    /** Older kept files were named after the style's display name rather than its id. */
++    private static final String[][] LEGACY_STYLE_NAMES = {
++        {"wandering-squares", "squares"}, {"pointillist-swirl", "pointillist"}, {"drifting-dots", "pointillist2"},
++        {"metric-wave", "metricwave"}, {"breathing-fabric", "fabric"}, {"light-cone", "cone"},
++        {"watercolor-wash", "watercolor"}, {"bauhaus-blocks", "blocks"}, {"striped-sunset", "sunset"},
++        {"contour-rings", "contours"}, {"diagonal-stripes", "stripes"}
++    };
++
++    /** Parses {@code art-<style>-<seed in base 36>.jpg}; null when the name is not a kept-art record. */
++    public static KeptArt keptArtFor(String fileName) {
++        if (fileName == null) {
++            return null;
++        }
++        java.util.regex.Matcher m = KEPT_NAME.matcher(fileName.toLowerCase(java.util.Locale.US));
++        if (!m.matches()) {
++            return null;
++        }
++        String style = m.group(1);
++        for (String[] legacy : LEGACY_STYLE_NAMES) {
++            if (legacy[0].equals(style)) {
++                style = legacy[1];
++            }
++        }
++        if (!style.matches("[a-z0-9]{1,20}")) {
++            return null;
++        }
++        try {
++            return new KeptArt(style, Long.parseLong(m.group(2), 36), fileName);
++        } catch (NumberFormatException e) {
++            return null;
++        }
 +    }
 +
 +    /** Reads {@code dir/wall-sources.json}; a missing or unreadable file means the defaults. */
@@ -1336,7 +1399,7 @@ index 251f2a9..80ba7a3 100644
       * One-line identity of the running build (version, variant, source commit, signing-key verdict)
       * for the page header. The certificate's own facts are only in {@code /state}: the server holds
 diff --git a/app/src/main/java/com/aphex3k/eo1/WebServer.java b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-index f6cbeb4..67358de 100644
+index f6cbeb4..c3c3a64 100644
 --- a/app/src/main/java/com/aphex3k/eo1/WebServer.java
 +++ b/app/src/main/java/com/aphex3k/eo1/WebServer.java
 @@ -259,6 +259,45 @@ public class WebServer {
@@ -1560,15 +1623,18 @@ index f6cbeb4..67358de 100644
              case "state":
                  if (!method.equals("GET")) {
                      send(os, 405, "text/plain", "method not allowed");
-@@ -591,6 +782,7 @@ public class WebServer {
+@@ -591,6 +782,10 @@ public class WebServer {
                  }
                  String name = urlDecode(decodePathSegment(path, "/delete"));
                  boolean ok = controller.deleteUploadedFile(name);
 +                deleteThumbnails(name);
++                if (ok && WallSources.keptArtFor(name) != null) {
++                    syncWallEntries();
++                }
                  sendJson(os, ok ? 200 : 404, ok ? okJson("deleted") : errorJson("not found"));
                  break;
              }
-@@ -735,6 +927,22 @@ public class WebServer {
+@@ -735,6 +930,22 @@ public class WebServer {
                  handleUpload(headers, is, os);
                  break;
  
@@ -1591,7 +1657,7 @@ index f6cbeb4..67358de 100644
              case "update": {
                  if (!method.equals("POST")) {
                      send(os, 405, "text/plain", "method not allowed");
-@@ -905,6 +1113,14 @@ public class WebServer {
+@@ -905,6 +1116,14 @@ public class WebServer {
              sendJson(os, 500, errorJson("cannot create upload dir"));
              return;
          }
@@ -1606,10 +1672,16 @@ index f6cbeb4..67358de 100644
          // Unique per-request temp dir so parallel uploads cannot collide on part names or
          // clean each other's in-progress uploads.
          File incoming = new File(uploadDir, "incoming_" + System.nanoTime());
-@@ -941,6 +1157,11 @@ public class WebServer {
+@@ -941,6 +1160,17 @@ public class WebServer {
                  }
              }
  
++            for (String name : saved) {
++                if (WallSources.keptArtFor(name) != null) {
++                    syncWallEntries();
++                    break;
++                }
++            }
 +            try {
 +                GeneratedFilesJanitor.run(uploadDir.getParentFile());
 +            } catch (Throwable t) {
@@ -1618,7 +1690,7 @@ index f6cbeb4..67358de 100644
              JsonObject o = new JsonObject();
              o.addProperty("ok", true);
              JsonArray arr = new JsonArray();
-@@ -1031,6 +1252,165 @@ public class WebServer {
+@@ -1031,6 +1261,127 @@ public class WebServer {
       * {@code POST /config/import}). The body is read off the socket with a hard cap before the
       * controller touches it.
       */
@@ -1719,45 +1791,7 @@ index f6cbeb4..67358de 100644
 +                sendJson(os, 400, errorJson("could not save sources"));
 +                return;
 +            }
-+            // The art page is shown through the frame's web-page source: one entry per slot.
-+            JsonArray kept = new JsonArray();
-+            JsonArray backends = cfg.has("backends") && cfg.get("backends").isJsonArray()
-+                    ? cfg.getAsJsonArray("backends") : new JsonArray();
-+            for (int i = 0; i < backends.size(); i++) {
-+                JsonObject b = backends.get(i).getAsJsonObject();
-+                String bid = b.has("id") ? b.get("id").getAsString() : "";
-+                if (!bid.startsWith(WallSources.ART_ID_PREFIX)) {
-+                    kept.add(b);
-+                }
-+            }
-+            for (int i = 0; i < kept.size(); i++) {
-+                if (WallSources.MUSIC_ID.equals(kept.get(i).getAsJsonObject().has("id")
-+                        ? kept.get(i).getAsJsonObject().get("id").getAsString() : "")) {
-+                    kept.remove(i);
-+                    i--;
-+                }
-+            }
-+            if (ws.music) {
-+                JsonObject m = new JsonObject();
-+                m.addProperty("type", "web");
-+                m.addProperty("id", WallSources.MUSIC_ID);
-+                m.addProperty("host", "http://127.0.0.1:" + boundPort + "/music/?style=" + ws.musicStyle
-+                        + "&lead=" + ws.musicLead);
-+                m.addProperty("enabled", true);
-+                kept.add(m);
-+            }
-+            if (ws.art) {
-+                for (int i = 1; i <= ws.artCount; i++) {
-+                    JsonObject b = new JsonObject();
-+                    b.addProperty("type", "web");
-+                    b.addProperty("id", WallSources.ART_ID_PREFIX + i);
-+                    b.addProperty("host", "http://127.0.0.1:" + boundPort + "/art/?slot=" + i
-+                            + (ws.artStyles.isEmpty() ? "" : "&styles=" + ws.artStyles));
-+                    b.addProperty("enabled", true);
-+                    kept.add(b);
-+                }
-+            }
-+            cfg.add("backends", kept);
++            applyWallEntries(cfg, ws);
 +        }
 +        if (req.has("timeZone")) {
 +            String tz = req.get("timeZone").getAsString();
@@ -1784,7 +1818,7 @@ index f6cbeb4..67358de 100644
      private void handleConfigPost(Map<String, String> headers, InputStream is, OutputStream os)
              throws IOException {
          long declared = parseLongLenient(headers.get("content-length"));
-@@ -1208,6 +1588,136 @@ public class WebServer {
+@@ -1208,6 +1559,199 @@ public class WebServer {
  
      // --- rendering ---
  
@@ -1874,6 +1908,69 @@ index f6cbeb4..67358de 100644
 +    /** Uploads are refused when they would leave less than this free on the frame. */
 +    private static final long LOW_SPACE_RESERVE_BYTES = 150L * 1024 * 1024;
 +
++    private static final int MAX_KEPT_ART = 24;
++
++    /**
++     * Rewrites the live-page entries in {@code cfg} from the wall sources and the kept-art records:
++     * the music page, N "surprise" art slots, and one entry per kept piece that replays that exact
++     * style and seed. All of them are web-page backends pointing at this frame's own pages.
++     */
++    private void applyWallEntries(JsonObject cfg, WallSources ws) {
++        JsonArray out = new JsonArray();
++        JsonArray backends = cfg.has("backends") && cfg.get("backends").isJsonArray()
++                ? cfg.getAsJsonArray("backends") : new JsonArray();
++        for (int i = 0; i < backends.size(); i++) {
++            JsonObject b = backends.get(i).getAsJsonObject();
++            String bid = b.has("id") ? b.get("id").getAsString() : "";
++            if (!bid.startsWith(WallSources.ART_ID_PREFIX) && !bid.equals(WallSources.MUSIC_ID)) {
++                out.add(b);
++            }
++        }
++        if (ws.music) {
++            out.add(webEntry(WallSources.MUSIC_ID, "http://127.0.0.1:" + boundPort + "/music/?style="
++                    + ws.musicStyle + "&lead=" + ws.musicLead));
++        }
++        if (ws.art) {
++            for (int i = 1; i <= ws.artCount; i++) {
++                out.add(webEntry(WallSources.ART_ID_PREFIX + i, "http://127.0.0.1:" + boundPort + "/art/?slot=" + i
++                        + (ws.artStyles.isEmpty() ? "" : "&styles=" + ws.artStyles)));
++            }
++            int n = 0;
++            java.util.Set<String> seen = new java.util.HashSet<String>();
++            for (UploadedMedia.FileInfo f : controller.listUploadedFiles()) {
++                WallSources.KeptArt k = WallSources.keptArtFor(f.name);
++                if (k != null && seen.add(k.backendId()) && n++ < MAX_KEPT_ART) {
++                    out.add(webEntry(k.backendId(), k.url(boundPort)));
++                }
++            }
++        }
++        cfg.add("backends", out);
++    }
++
++    private static JsonObject webEntry(String id, String url) {
++        JsonObject b = new JsonObject();
++        b.addProperty("type", "web");
++        b.addProperty("id", id);
++        b.addProperty("host", url);
++        b.addProperty("enabled", true);
++        return b;
++    }
++
++    /** Re-derives the live entries after a kept-art record is added or removed. */
++    private void syncWallEntries() {
++        try {
++            JsonObject cfg = com.google.gson.JsonParser.parseString(controller.exportConfigurationJson())
++                    .getAsJsonObject();
++            applyWallEntries(cfg, WallSources.read(controller.uploadedDir().getParentFile()));
++            String err = controller.importConfigurationJson(cfg.toString());
++            if (err != null) {
++                Log.w(TAG, "wall entries not applied: " + err);
++            }
++        } catch (Throwable t) {
++            Log.w(TAG, "wall entries sync failed: " + t);
++        }
++    }
++
 +    private MusicService music() {
 +        return MusicService.get(controller.uploadedDir().getParentFile());
 +    }
@@ -1921,7 +2018,7 @@ index f6cbeb4..67358de 100644
      private String renderIndex() {
          File dir = controller.uploadedDir();
          UploadedMedia.FileInfo[] files = controller.listUploadedFiles();
-@@ -1232,6 +1742,7 @@ public class WebServer {
+@@ -1232,6 +1776,7 @@ public class WebServer {
              sb.append("<p><small>").append(escapeHtml(termsNotice)).append("</small></p>");
          }
          sb.append("<p>").append(escapeHtml(controller.appBuildSummary())).append("</p>");
@@ -1929,11 +2026,19 @@ index f6cbeb4..67358de 100644
          sb.append("<p><a href=\"/state\">state</a> · <a href=\"/logs\">logs</a> · ")
                  .append("<a href=\"/crashes\">crashes</a> · ")
                  .append("<a href=\"/reports\">reports</a> · ")
-@@ -2156,6 +2667,7 @@ public class WebServer {
+@@ -2156,6 +2701,15 @@ public class WebServer {
              o.addProperty("name", f.name);
              o.addProperty("size", f.size);
              o.addProperty("lastModified", f.lastModified);
-+            o.addProperty("assetKey", "local:" + com.aphex3k.media.local.LocalMediaBackend.localAssetIdFor(f.name));
++            WallSources.KeptArt kept = WallSources.keptArtFor(f.name);
++            if (kept != null) {
++                o.addProperty("assetKey", kept.backendId() + ":"
++                        + com.aphex3k.media.web.WebsiteBackend.webAssetIdFor(kept.url(boundPort)));
++                o.addProperty("artStyle", kept.style);
++                o.addProperty("artSeed", kept.seed);
++            } else {
++                o.addProperty("assetKey", "local:" + com.aphex3k.media.local.LocalMediaBackend.localAssetIdFor(f.name));
++            }
              arr.add(o);
          }
          return arr.toString();
@@ -6247,10 +6352,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..cabd37d
+index 0000000..a1da434
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1652 @@
+@@ -0,0 +1,1672 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -6474,6 +6579,8 @@ index 0000000..cabd37d
 +.sheet.open{transform:none;visibility:visible;transition:transform .22s ease}
 +.sheet-bg.open{display:block}
 +.sheet .preview{width:100%;max-height:55vh;object-fit:contain;background:#000;display:block}
++.livewrap{width:216px;height:384px;margin:0 auto;overflow:hidden;background:#000}
++.livewrap iframe{width:540px;height:960px;border:0;transform:scale(.4);transform-origin:0 0;pointer-events:none}
 +.sheet .meta{color:var(--muted);font-size:13px;margin:10px 0;word-break:break-all}
 +.sheet .warnbox{border:1px solid var(--warn);padding:10px;font-size:13px;margin-bottom:10px;white-space:pre-wrap}
 +.sheet .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -6814,7 +6921,12 @@ index 0000000..cabd37d
 +    if (!n) return "";
 +    if (/^spotify-grid-/.test(n)) return "Spotify · Recent albums";
 +    if (/^spotify-nowplaying-/.test(n)) return "Spotify · Now playing";
-+    if (/^art-/.test(n)) { var a = n.replace(/^art-/, "").replace(/\.[^.]+$/, "").replace(/-[a-z0-9]{4,9}$/, "").replace(/-/g, " "); return "Kept art" + (a ? " · " + a.replace(/\b\w/g, function(c){ return c.toUpperCase(); }) : ""); }
++    if (/^art-/.test(n)) {
++      var am = /^art-(.+)-[a-z0-9]{1,8}\.[^.]+$/.exec(n), sid = am ? am[1] : "";
++      var hit = (typeof artStyleList !== "undefined" ? artStyleList : []).filter(function(x){ return x.id === sid; })[0];
++      var label = hit ? hit.name : sid.replace(/-/g, " ").replace(/\b\w/g, function(c){ return c.toUpperCase(); });
++      return "Kept art" + (label ? " · " + label : "");
++    }
 +    if (/^nyt-frontpage-/.test(n)) { var m = /(\d{4})-(\d\d)-(\d\d)/.exec(n); return "NYT front page" + (m ? " · " + new Date(+m[1], m[2] - 1, +m[3]).toLocaleDateString(undefined, {month: "short", day: "numeric"}) : ""); }
 +    return n.replace(/\.[^.]+$/, "").replace(/_[a-z0-9]{6,9}$/, "").replace(/[_-]+/g, " ").trim() || n;
 +  }
@@ -7000,13 +7112,19 @@ index 0000000..cabd37d
 +  function openSheet(f){
 +    sheetName = f.name;
 +    var m = $("sheetMedia"); m.innerHTML = "";
-+    if (VIDEO.test(f.name)) {
++    if (f.artStyle) {
++      // a kept piece replays live: same style, same seed
++      var wrap = document.createElement("div"); wrap.className = "livewrap";
++      var fr = document.createElement("iframe"); fr.setAttribute("scrolling", "no"); fr.title = "Kept art preview";
++      fr.src = "/art/?style=" + encodeURIComponent(f.artStyle) + "&seed=" + f.artSeed + "&preview=1";
++      wrap.appendChild(fr); m.appendChild(wrap);
++    } else if (VIDEO.test(f.name)) {
 +      var v = document.createElement("video"); v.className = "preview"; v.src = fileUrl(f.name);
 +      v.muted = true; v.playsInline = true; v.controls = true; m.appendChild(v);
 +    } else {
 +      var i = document.createElement("img"); i.className = "preview"; i.src = fileUrl(f.name); m.appendChild(i);
 +    }
-+    $("sheetMeta").textContent = friendlyName(f.name) + " · " + Math.max(1, Math.round(f.size / 1024)) + " KB";
++    $("sheetMeta").textContent = f.artStyle ? friendlyName(f.name) + " · replays live on the frame" : friendlyName(f.name) + " · " + Math.max(1, Math.round(f.size / 1024)) + " KB";
 +    var w = $("sheetWarn"); w.hidden = true;
 +    if (f.warn) {
 +      fetch(fileUrl(f.warn)).then(function(r){ return r.text(); }).then(function(txt){
@@ -7018,6 +7136,7 @@ index 0000000..cabd37d
 +  function closeSheet(){
 +    $("sheetBg").classList.remove("open"); $("sheet").classList.remove("open");
 +    var v = $("sheetMedia").querySelector("video"); if (v) v.pause();
++    var lf = $("sheetMedia").querySelector("iframe"); if (lf) lf.src = "about:blank";
 +    sheetName = null;
 +  }
 +  $("sheetBg").onclick = function(){ if (confirmResolve) closeConfirm(false); else closeSheet(); };
@@ -7816,8 +7935,14 @@ index 0000000..cabd37d
 +    cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
 +    cx.drawImage(cv, (W - cv.width * k) / 2, (H - cv.height * k) / 2, cv.width * k, cv.height * k);
 +    toJpeg(c).then(function(blob){
-+      return uploadBlob(blob, "art-" + ($("artName").textContent || "art").toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + artSeed.toString(36) + ".jpg");
-+    }).then(function(){ toast("Kept — it’s in your rotation"); refreshFiles(); }).catch(function(){ toast("Couldn’t save it"); });
++      var cur = {}; try { cur = $("artFrame").contentWindow.ART_CURRENT || {}; } catch (e) {}
++      var sid = cur.id || artStyle, seed = typeof cur.seed === "number" ? cur.seed : artSeed;
++      if (!sid) throw new Error("no style");
++      return uploadBlob(blob, "art-" + sid + "-" + seed.toString(36) + ".jpg");
++    }).then(function(){
++      toast(sources.art ? "Kept. It’ll replay, animated, in your rotation" : "Kept. Switch Generative art on to see it", 3500);
++      refreshFiles(); setTimeout(refreshQueue, 2500);
++    }).catch(function(){ toast("Couldn’t save it"); });
 +  };
 +
 +  // ---------- update the frame from the phone ----------
@@ -9569,10 +9694,10 @@ index 0000000..72b7665
 +}
 diff --git a/app/src/test/java/com/aphex3k/eo1/WallSourcesTest.java b/app/src/test/java/com/aphex3k/eo1/WallSourcesTest.java
 new file mode 100644
-index 0000000..010de4a
+index 0000000..e1ba734
 --- /dev/null
 +++ b/app/src/test/java/com/aphex3k/eo1/WallSourcesTest.java
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,75 @@
 +package com.aphex3k.eo1;
 +
 +import static org.junit.Assert.assertEquals;
@@ -9621,9 +9746,24 @@ index 0000000..010de4a
 +        assertFalse(r.allows("IMG_1.jpg"));
 +        assertFalse(r.allows("nyt-frontpage-2026-11-21-clean.jpg"));
 +        assertTrue(r.allows("spotify-grid-x.jpg"));
-+        assertTrue(r.allows("art-blocks-1.jpg"));
++        assertFalse(r.allows("art-blocks-1.jpg"));   // kept art replays live; its still is only a record
 +        assertEquals(6, r.artCount);                 // clamped
 +        assertEquals("sunset,contours", r.artStyles);
++    }
++
++    @Test
++    public void keptArtRecordsReplayTheSameStyleAndSeed() {
++        WallSources.KeptArt k = WallSources.keptArtFor("art-sunset-9q1bql.jpg");
++        assertEquals("sunset", k.style);
++        assertEquals(Long.parseLong("9q1bql", 36), k.seed);
++        assertEquals("art-keep-sunset-9q1bql", k.backendId());
++        assertEquals("http://127.0.0.1:8080/art/?style=sunset&seed=" + k.seed, k.url(8080));
++        // files kept before the rename used the style's display name
++        assertEquals("sunset", WallSources.keptArtFor("art-striped-sunset-9q1bql.jpg").style);
++        assertEquals("pointillist2", WallSources.keptArtFor("art-drifting-dots-ee3jy2.jpg").style);
++        assertEquals(null, WallSources.keptArtFor("IMG_1.jpg"));
++        assertEquals(null, WallSources.keptArtFor("art-.jpg"));
++        assertEquals(null, WallSources.keptArtFor("art-two-words-unknown-abc.jpg"));
 +    }
 +
 +    @Test
