@@ -1,0 +1,103 @@
+# EO2 setup: no keyboard needed
+
+## Updating to a newer build
+
+From 2.0.7 on, the easiest way: on the phone page, **Settings → Update the frame → Choose APK…**.
+The frame only accepts APKs signed with your key that are newer than what's installed, then
+installs it itself. The script below still works and is the fallback.
+
+If the page says the update is **waiting** and the frame's installer is busy: the frame installs
+through its own adb connection, and that is blocked while a computer is still attached to the
+frame over adb. On the computer run `adb kill-server` (the scripts here now disconnect by
+themselves when they finish), or reboot the frame, then tap **Install**.
+
+Put the new APK next to `update-eo2.sh` and run `bash update-eo2.sh FRAME_IP`. It updates in
+place, or, if the new build is signed with a different key, backs up your photos and settings,
+reinstalls, and restores them. The phone page lives at `http://FRAME_IP:8080/`; the original
+page is at `/advanced`. App changes are in `patches/`.
+
+## Easiest: run the script (Mac)
+
+1. Make a folder, e.g. `~/EO2`, and put two files in it:
+   - `setup-eo2.sh` (from this folder of the repo)
+   - the frame app APK, `eo2-frame-<version>.apk`, from the
+     [latest release](https://github.com/shellen/EO1/releases/latest)
+2. Open Terminal and run:
+
+       cd ~/EO2
+       bash setup-eo2.sh
+
+It installs adb (via Homebrew) if needed, finds the frame on your Wi-Fi, removes the other
+home-screen apps, asks for your time zone / interval / night hours, installs, reboots, and opens
+the upload page. It asks before every change and is safe to re-run.
+
+The manual steps below are what the script does, in case you want to do them by hand.
+`configuration.json` in this folder is an example settings file (the script writes its own).
+
+The EO2 ships with ADB (Android's debug tool) listening on Wi-Fi port 5555, with root, from boot.
+So everything below is done from your computer over Wi-Fi. No OTG, keyboard or mouse needed.
+
+## 0. Before you start
+
+- The frame must be on your Wi-Fi and you need its IP address (check your router's client list;
+  set a DHCP reservation so it never changes). If it isn't on Wi-Fi, that is the one time you
+  need the keyboard: join Wi-Fi in Android Settings.
+- Install adb on your computer:
+  - Mac: `brew install android-platform-tools`
+  - Windows: use WSL (Ubuntu) and `sudo apt install adb`. The aphex3k author found native Windows adb fails to connect.
+- Edit `configuration.json` if you want: `selectedTimeZoneId` (e.g. `America/New_York`),
+  `quietHours` (cron format: `* 0-6 * * *` = off midnight–6:59; `[]` = never off), `interval` (minutes).
+
+## 1. Connect
+
+    adb connect FRAME_IP:5555
+    adb devices            # should list FRAME_IP:5555  device
+
+## 2. Remove every other home-screen app (this fixes "Select a home app")
+
+    adb shell pm list packages | grep -i -E "electric|eo1|geniatech"
+
+You'll likely see `com.electricobjects.app`, `com.geniatech.upgrade`, and whatever APK you
+flashed before (e.g. `com.dan.eo1`). Then:
+
+    adb shell pm disable com.electricobjects.app
+    adb shell pm disable com.geniatech.upgrade
+    adb uninstall com.dan.eo1          # use the package name of the APK you flashed earlier
+
+With only one app claiming to be the home screen, Android has nothing to ask about, so the
+chooser can't come back after reboots or updates.
+
+## 3. Install
+
+    adb install -r eo2-frame-2.0.1.apk
+
+## 4. Configure without touching the frame
+
+Launch it once so its data folder exists, then push the config:
+
+    adb shell am start -n com.aphex3k.eo1/.MainActivity
+    adb push configuration.json /data/data/com.aphex3k.eo1/files/configuration.json
+    adb shell chmod 666 /data/data/com.aphex3k.eo1/files/configuration.json
+    adb reboot
+
+## 5. Use it from your phone
+
+On any phone/laptop on the same Wi-Fi, open **http://FRAME_IP:8080/**
+(bookmark it / "Add to Home Screen"). From that page:
+- **Upload**: pick up to 32 photos at a time. They show up within one interval (or press **Next**).
+- **Delete**, **Next**, **Screen** on/off, **Brightness** (the EO2 has no light sensor, so this is the only brightness control).
+
+Photo tips: the panel is portrait 1080×1920 and photos are **cropped to fill**, so 9:16 portrait
+shots look best. JPEG/PNG work; iPhone **HEIC does not**. Set iPhone to
+Settings → Camera → Formats → *Most Compatible*, or share as JPEG. Video: H.264 MP4, ≤1080p30, plays muted.
+
+## If something goes wrong
+
+- Chooser shows up anyway: run step 2's `list packages` again. Another home-capable app is still enabled.
+- Photo never appears: look in the page's Files table for `<name>.incompat.txt`. It says why.
+- Page won't load: try `http://FRAME_IP/` (port 80), and confirm the IP hasn't changed.
+
+## Security note
+
+ADB on port 5555 is open as root to anything on your network. That's how the EO2 ships, not
+something this app adds. Fine on a home network you trust; don't put the frame on public/guest Wi-Fi.
