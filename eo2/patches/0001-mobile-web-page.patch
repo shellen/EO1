@@ -186,7 +186,7 @@ index 0000000..6911fb3
 +    }
 +}
 diff --git a/app/src/main/java/com/aphex3k/eo1/MainActivity.java b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
-index b12c5a6..bbfa9ba 100644
+index b12c5a6..6ce90c2 100644
 --- a/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 +++ b/app/src/main/java/com/aphex3k/eo1/MainActivity.java
 @@ -846,6 +846,7 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
@@ -301,7 +301,34 @@ index b12c5a6..bbfa9ba 100644
      @Override
      public String buildStateJson() {
          JsonObject o = new JsonObject();
-@@ -6249,10 +6340,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -6218,6 +6309,26 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+             }
+             return sendKeyCode(keyCode);
+         }
++        // The phone page's Maintenance buttons (POST only). Both reuse the watchdog's own routines,
++        // on their own thread: a reboot goes through the frame's adbd and can take a moment.
++        if ("reboot".equals(action) || "restart-app".equals(action)) {
++            final boolean reboot = "reboot".equals(action);
++            new Thread(new Runnable() {
++                @Override
++                public void run() {
++                    try {
++                        if (reboot) {
++                            rebootDevice("requested from the phone page");
++                        } else {
++                            selfRestart();
++                        }
++                    } catch (Throwable t) {
++                        Log.w(TAG, "web " + (reboot ? "reboot" : "restart") + " failed: " + t);
++                    }
++                }
++            }, "web-maintenance").start();
++            return true;
++        }
+         if ("watchdog".equals(action)) {
+             // Debug builds only: rungs escalate over hours on real hardware, and the whole point of
+             // the ladder is that nobody has to be there when it fires. level 1..5 forces one.
+@@ -6249,10 +6360,13 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
                  // Debug-only: "the clip that misbehaves is #600 of 1000", which ?action=next cannot
                  // promise to reach. Checked and parked from this thread, which may read the pool's
                  // key set but never its records; the rotation worker picks the record up.
@@ -317,7 +344,7 @@ index b12c5a6..bbfa9ba 100644
                  if (!mediaManager.queueAssetDisplay(assetKey)) {
                      return false;
                  }
-@@ -6270,9 +6364,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
+@@ -6270,9 +6384,25 @@ public class MainActivity extends AppCompatActivity implements BrightnessManager
              case "screen":
                  task = this::toggleScreenOn;
                  break;
@@ -1309,7 +1336,7 @@ index 251f2a9..80ba7a3 100644
       * One-line identity of the running build (version, variant, source commit, signing-key verdict)
       * for the page header. The certificate's own facts are only in {@code /state}: the server holds
 diff --git a/app/src/main/java/com/aphex3k/eo1/WebServer.java b/app/src/main/java/com/aphex3k/eo1/WebServer.java
-index f6cbeb4..2c6b9a2 100644
+index f6cbeb4..caf0256 100644
 --- a/app/src/main/java/com/aphex3k/eo1/WebServer.java
 +++ b/app/src/main/java/com/aphex3k/eo1/WebServer.java
 @@ -259,6 +259,42 @@ public class WebServer {
@@ -1355,6 +1382,15 @@ index f6cbeb4..2c6b9a2 100644
          if (path.equals("/state")) {
              return "state";
          }
+@@ -357,7 +393,7 @@ public class WebServer {
+      */
+     private static final java.util.Set<String> POST_ONLY_ACTIONS =
+             java.util.Collections.unmodifiableSet(new java.util.HashSet<String>(
+-                    java.util.Arrays.asList("keyevent", "watchdog", "brightness")));
++                    java.util.Arrays.asList("keyevent", "watchdog", "brightness", "reboot", "restart-app")));
+ 
+     static boolean controlAllows(String method, String action) {
+         if (action == null) {
 @@ -522,6 +558,15 @@ public class WebServer {
  
          switch (routeKey) {
@@ -3681,10 +3717,10 @@ HcmV?d00001
 
 diff --git a/app/src/main/resources/web/mobile.html b/app/src/main/resources/web/mobile.html
 new file mode 100644
-index 0000000..6abebf7
+index 0000000..b17bb91
 --- /dev/null
 +++ b/app/src/main/resources/web/mobile.html
-@@ -0,0 +1,1493 @@
+@@ -0,0 +1,1596 @@
 +<!doctype html>
 +<html lang="en">
 +<head>
@@ -3694,387 +3730,443 @@ index 0000000..6abebf7
 +<meta name="mobile-web-app-capable" content="yes">
 +<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 +<meta name="apple-mobile-web-app-title" content="Frame">
-+<meta name="theme-color" content="#111111">
++<meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
++<meta name="theme-color" content="#0f0f0e" media="(prefers-color-scheme: dark)">
 +<link rel="apple-touch-icon" href="/icon.png">
 +<link rel="icon" href="/icon.png">
 +<title>Frame</title>
 +<style>
 +:root{
-+  --bg:#f4f2ee;--card:#ffffff;--ink:#1b1a18;--muted:#6f6a63;--line:#e4e0d9;
-+  --accent:#1b1a18;--accent-ink:#ffffff;--good:#2f7d4f;--warn:#b5651d;--bad:#b3261e;
-+  --radius:16px;--shadow:0 1px 2px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.06);
++  --bg:#f5f3ee;--ink:#161513;--muted:#77726a;--line:#d9d5cc;--fill:#eae6dd;
++  --accent:#d4472a;--good:#2f7d4f;--warn:#a8641c;--bad:#b3261e;
++  --serif:ui-serif,"New York","Iowan Old Style",Georgia,"Times New Roman",serif;
++  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
++  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 +}
 +@media (prefers-color-scheme:dark){:root{
-+  --bg:#111110;--card:#1c1b1a;--ink:#f2efe9;--muted:#a19b92;--line:#2c2a27;
-+  --accent:#f2efe9;--accent-ink:#111110;--good:#6cc08b;--warn:#e3a35d;--bad:#d9433a;
-+  --shadow:none;
++  --bg:#0f0f0e;--ink:#efece5;--muted:#928c82;--line:#2b2926;--fill:#1b1a18;
++  --accent:#ff6a4a;--good:#6cc08b;--warn:#e3a35d;--bad:#e5534b;
 +}}
 +*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 +[hidden]{display:none!important}
 +html,body{margin:0;background:var(--bg);color:var(--ink)}
-+body{font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-+  padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 24px);
-+  max-width:640px;margin:0 auto}
-+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:2px 0 12px}
-+h1{font-size:26px;letter-spacing:-.02em;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-+.hinfo{text-align:right;font-size:13px;color:var(--muted);line-height:1.35;flex:none}
-+.hinfo>div:first-child{color:var(--ink);font-weight:600;display:flex;align-items:center;justify-content:flex-end;gap:6px}
-+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none;display:inline-block}
++body{font:16px/1.4 var(--sans);max-width:640px;margin:0 auto;
++  padding:calc(env(safe-area-inset-top) + 14px) 18px calc(env(safe-area-inset-bottom) + 84px)}
++button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;padding:0}
++a{color:inherit}
++
++/* type */
++.kicker,.sectionhead .count,.rowhead span,.qwhen,.info dt,.tabs button,.badge,.pill,.setlabel small,.xt small,.listrow small{
++  font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
++h1{font:600 34px/1.05 var(--serif);letter-spacing:-.01em;margin:6px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++h2{font:600 22px/1.1 var(--serif);margin:0}
++h3{font:600 17px/1.2 var(--sans);margin:0}
++
++/* masthead */
++header.mast{padding-bottom:14px;border-bottom:2px solid var(--ink);margin-bottom:18px}
++.kicker{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
++.dot{width:7px;height:7px;background:var(--muted);flex:none;display:inline-block}
 +.dot.on{background:var(--good)}.dot.sleep{background:var(--warn)}.dot.off{background:var(--bad)}
-+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid var(--line)}
-+.nowcard{padding:10px 12px;margin-bottom:10px}
-+.nowtop{display:flex;gap:12px;align-items:center}
-+.nowtop .thumb{width:36px;aspect-ratio:9/16;border-radius:6px;background:var(--line) center/cover no-repeat;flex:none}
-+.nowtext{min-width:0;flex:1}
-+.nowtext .label{font-size:12px;color:var(--muted)}
-+.nowtext .name{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-+.iconbtn{width:42px;height:42px;border-radius:50%;background:var(--bg);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex:none}
-+.iconbtn svg{width:20px;height:20px}
-+.iconbtn:active{transform:scale(.94)}
-+.iconbtn.off{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-+.bright{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);color:var(--muted)}
-+.bright svg{width:18px;height:18px;flex:none}
-+.bright span{font-size:13px;min-width:28px;text-align:right;font-variant-numeric:tabular-nums}
-+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:28px;background:transparent;margin:0}
-+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(to right,var(--ink) var(--pct,50%),var(--line) var(--pct,50%))}
-+input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--line)}
-+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--card);border:1px solid var(--line);box-shadow:0 1px 4px rgba(0,0,0,.25);margin-top:-9px}
-+input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:var(--card);border:1px solid var(--line)}
-+.addrow{display:flex;gap:8px;align-items:stretch;margin-bottom:18px}
-+.addrow .primary{flex:1;width:auto}
-+.addrow .seg{align-items:stretch}
-+.addrow .seg button{padding:0 12px}
-+.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-+button{font:inherit;color:inherit;border:0;cursor:pointer}
-+.ctl{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 6px;
-+  display:flex;flex-direction:column;align-items:center;gap:4px;font-size:13px;font-weight:600;box-shadow:var(--shadow)}
-+.ctl svg{width:22px;height:22px}
-+.ctl:active,.primary:active{transform:scale(.97)}
-+.ctl small{font-weight:400;color:var(--muted);font-size:11px}
-+.primary{width:100%;background:var(--accent);color:var(--accent-ink);border-radius:12px;padding:12px;
-+  font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;gap:10px}
-+.primary svg{width:18px;height:18px}
-+.fitrow{display:flex;justify-content:center;gap:6px;margin:10px 0 18px;font-size:14px}
-+.seg{display:inline-flex;background:var(--line);border-radius:10px;padding:3px}
-+.seg button{background:none;padding:6px 12px;border-radius:8px;font-size:13px;color:var(--muted)}
-+.seg button.sel{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
-+.sectionhead{display:flex;justify-content:space-between;align-items:baseline;margin:22px 2px 8px}
-+.sectionhead:first-of-type{margin-top:0}
-+h2{font-size:17px;margin:0}
-+.count{color:var(--muted);font-size:14px}
-+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
-+@media (min-width:560px){.grid{grid-template-columns:repeat(5,1fr)}}
-+.tile{position:relative;aspect-ratio:9/16;border-radius:8px;overflow:hidden;background:var(--line);padding:0}
-+.tile img{width:100%;height:100%;object-fit:cover;display:block}
-+.tile .badge{position:absolute;left:4px;top:4px;background:rgba(0,0,0,.65);color:#fff;font-size:10px;
-+  font-weight:700;padding:2px 6px;border-radius:999px}
-+.tile .badge.warn{background:var(--warn)}
-+.tile .badge.gif{left:auto;right:4px;top:auto;bottom:4px}
-+.tile .vid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;font-weight:600;flex-direction:column;gap:6px}
-+.tile .vid svg{width:28px;height:28px}
-+.tile.pending{opacity:.55}
-+.tile .bar{position:absolute;left:0;bottom:0;height:4px;background:var(--good);transition:width .2s}
-+.empty{padding:28px 16px;text-align:center;color:var(--muted)}
-+.empty b{display:block;color:var(--ink);font-size:17px;margin-bottom:4px}
-+footer{margin-top:20px;text-align:center;font-size:13px;color:var(--muted)}
-+footer a{color:var(--muted)}
-+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:10}
-+.sheet{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--card);
-+  border-radius:20px 20px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px);transform:translateY(100%);
-+  transition:transform .25s ease,visibility 0s .25s;z-index:11;visibility:hidden}
-+.sheet.open{transform:none;visibility:visible;transition:transform .25s ease}.sheet-bg.open{display:block}
-+.sheet .preview{width:100%;max-height:55vh;object-fit:contain;border-radius:12px;background:#000;display:block}
-+.sheet .meta{color:var(--muted);font-size:13px;margin:10px 2px;word-break:break-all}
-+.sheet .warnbox{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--ink);border-radius:10px;padding:10px;font-size:13px;margin-bottom:10px;white-space:pre-wrap}
-+.sheet .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-+.btn{background:var(--line);border-radius:12px;padding:14px;font-weight:600}
-+.btn.danger{background:var(--bad);color:#fff}
-+.settings{padding:4px 14px;margin:18px 0 6px}
-+.setrow{padding:12px 0;border-bottom:1px solid var(--line)}
-+.setrow:last-child{border-bottom:0}
-+.setlabel{font-weight:600;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
-+.setlabel small{font-weight:400;color:var(--muted);font-size:13px}
++#sched:not(:empty):before{content:"· "}
++a.btn{text-decoration:none;display:inline-block}
++.offline{display:none;border:1px solid var(--bad);color:var(--bad);padding:10px 12px;font-size:14px;margin-bottom:14px}
++
++/* tabs */
++.tab{display:none}
++body[data-tab="now"] .tab[data-tab="now"],body[data-tab="library"] .tab[data-tab="library"],
++body[data-tab="extras"] .tab[data-tab="extras"],body[data-tab="frame"] .tab[data-tab="frame"],body.all .tab{display:block}
++body.all .tab{margin-bottom:34px}
++.tabs{position:fixed;left:0;right:0;bottom:0;z-index:8;background:var(--bg);border-top:1px solid var(--ink);
++  display:grid;grid-template-columns:repeat(4,1fr);max-width:640px;margin:0 auto;padding-bottom:env(safe-area-inset-bottom)}
++.tabs button{padding:16px 4px 15px;font-size:12px;color:var(--muted);border-top:3px solid transparent;margin-top:-2px}
++.tabs button.sel{color:var(--ink);border-top-color:var(--accent);font-weight:700}
++
++/* buttons */
++.btn,.primary{border:1px solid var(--ink);border-radius:6px;padding:11px 14px;font-weight:600;font-size:15px;text-align:center}
++.primary{background:var(--ink);color:var(--bg);width:100%;display:flex;align-items:center;justify-content:center;gap:8px}
++.primary svg{width:16px;height:16px}
++.primary[disabled],.btn[disabled]{opacity:.5}
++.btn:active,.primary:active,.chip:active{opacity:.7}
++.btn.small{padding:8px 12px;font-size:14px}
++.btn.go{background:var(--ink);color:var(--bg)}
++.btn.danger{border-color:var(--bad);color:var(--bad)}
++.sheet .btn.danger{background:var(--bad);color:#fff}
++.linkbtn{text-decoration:underline;font-size:14px;text-underline-offset:3px}
++.selbtn{font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;text-decoration:underline;text-underline-offset:3px}
++
++/* option groups */
++.seg{display:inline-flex;border:1px solid var(--ink);border-radius:6px;overflow:hidden}
++.seg button{padding:9px 12px;font-size:14px;color:var(--muted);border-left:1px solid var(--line)}
++.seg button:first-child{border-left:0}
++.seg button.sel{background:var(--ink);color:var(--bg)}
 +.chips{display:flex;flex-wrap:wrap;gap:6px}
-+.chip{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:8px 13px;font-size:14px}
-+.chip.sel{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-+.switch{position:relative;width:51px;height:31px;flex:none}
++.chip{border:1px solid var(--line);border-radius:6px;padding:8px 12px;font-size:14px}
++.chip.sel{background:var(--ink);color:var(--bg);border-color:var(--ink)}
++.switch{position:relative;width:46px;height:28px;flex:none;display:block}
 +.switch input{opacity:0;width:0;height:0;position:absolute}
-+.switch span{position:absolute;inset:0;background:var(--line);border-radius:999px;transition:.2s}
-+.switch span:before{content:"";position:absolute;width:27px;height:27px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
-+.switch input:checked+span{background:var(--good)}
-+.switch input:checked+span:before{transform:translateX(20px)}
-+.hours{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:15px;color:var(--muted)}
-+.hours select{flex:1}
-+.hours select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
-+.linkbtn{background:none;color:var(--ink);text-decoration:underline;padding:0;font-size:14px}
-+.selbtn{background:none;font-size:15px;font-weight:600;color:var(--ink);padding:4px 2px}
-+.tile .check{position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;border:2px solid #fff;
-+  background:rgba(0,0,0,.25);display:none;box-shadow:0 1px 3px rgba(0,0,0,.4)}
-+.selecting .tile .check{display:block}
-+.tile.picked .check{background:var(--good);border-color:var(--good)}
-+.tile.picked .check:after{content:"";position:absolute;left:6px;top:2px;width:6px;height:11px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
-+.tile.picked img{opacity:.75}
-+.selbar{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--card);border-top:1px solid var(--line);
-+  padding:12px 16px calc(env(safe-area-inset-bottom) + 12px);display:none;gap:8px;grid-template-columns:1fr 1fr;z-index:9}
-+.selecting .selbar{display:grid}
-+.selecting footer{margin-bottom:90px}
-+.sheet .row3{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:8px}
-+.btn.go{background:var(--accent);color:var(--accent-ink)}
-+.extras{padding:14px;margin:6px 0}
-+.extras h3{margin:0 0 2px;font-size:16px}
-+.extras p{margin:0 0 12px;color:var(--muted);font-size:14px}
-+.extras .seg{margin-bottom:12px;display:flex}
-+.extras .seg button{flex:1}
-+.extras .primary{padding:13px;font-size:16px}
-+.extras .primary[disabled]{opacity:.6}
-+.extras .progress{font-size:13px;color:var(--muted);margin-top:8px}
-+.extras .progress:empty{display:none}
-+.extras .autorow{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;margin-top:12px}
-+.settings{margin-top:0}
-+.namerow{display:flex;gap:8px}
-+.namerow input{flex:1;min-width:0;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
-+.btn.small{padding:9px 14px}
-+.info{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:14px}
-+.info dt{color:var(--muted)}.info dd{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-+.ctitle{font-weight:600;font-size:17px;text-align:center;margin:6px 0 16px}
-+.extras + .extras{margin-top:10px}
-+.extras .chips{margin-bottom:12px}
-+.extras .steps{margin:0 0 12px;padding-left:20px;font-size:14px;color:var(--ink)}
-+.extras .steps li{margin-bottom:8px}
-+.extras code{font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 5px;word-break:break-all}
-+.extras a{color:var(--ink)}
-+.extras .who{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--muted);margin-bottom:10px}
-+.srcrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0}
-+.srcrow + .srcrow{border-top:1px solid var(--line)}
-+.srcrow b{font-weight:600;display:block}
-+.srcrow small{color:var(--muted);font-size:13px}
-+.tile.off img{opacity:.35;filter:grayscale(1)}
-+.tile .badge.offb{left:auto;right:4px;top:auto;bottom:4px;background:var(--muted)}
-+.artwrap{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
-+.artprev{width:108px;aspect-ratio:9/16;border-radius:8px;overflow:hidden;background:#000;flex:none;border:1px solid var(--line)}
-+.artprev iframe{width:540px;height:960px;border:0;transform:scale(.2);transform-origin:0 0;pointer-events:none}
-+.artside{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
-+.artside .btn{padding:10px}
-+.artname{font-size:14px;color:var(--muted)}
-+.extras .chips.styles .chip{padding:6px 11px;font-size:13px}
++.switch span{position:absolute;inset:0;border:1px solid var(--ink);border-radius:999px;transition:.15s}
++.switch span:before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;background:var(--ink);border-radius:50%;transition:.15s}
++.switch input:checked+span{background:var(--ink)}
++.switch input:checked+span:before{transform:translateX(18px);background:var(--bg)}
++
++/* now */
++.nowpanel{display:flex;gap:16px;align-items:stretch}
++.nowpanel .thumb{width:118px;aspect-ratio:9/16;background:var(--fill) center/cover no-repeat;border:1px solid var(--ink);flex:none}
++.nowtext{min-width:0;flex:1;display:flex;flex-direction:column}
++.nowtext .name{font:600 24px/1.15 var(--serif);margin:6px 0 auto;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
++.nowbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
++.nowbtns .btn.off{background:var(--ink);color:var(--bg)}
++.bright{display:flex;align-items:center;gap:12px;margin-top:16px;padding:12px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
++.bright .kicker{flex:none}
++.bright > span:last-child{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:28px;text-align:right}
++input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:28px;background:transparent;margin:0}
++input[type=range]::-webkit-slider-runnable-track{height:2px;background:linear-gradient(to right,var(--ink) var(--pct,50%),var(--line) var(--pct,50%))}
++input[type=range]::-moz-range-track{height:2px;background:var(--line)}
++input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--bg);border:2px solid var(--ink);margin-top:-10px}
++input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--bg);border:2px solid var(--ink)}
++
++/* section heads */
++.sectionhead{display:flex;justify-content:space-between;align-items:baseline;margin:26px 0 10px}
++.tab > .sectionhead:first-child{margin-top:0}
++.upnote{font-size:13px;color:var(--muted);margin:-4px 0 10px;border-left:3px solid var(--accent);padding-left:10px}
++.upnote:empty{display:none}
++
++/* carousels and tiles */
 +.carousel{display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
-+  margin:0 -16px;padding:0 16px 6px;scroll-padding:0 16px;scrollbar-width:none}
++  margin:0 -18px;padding:0 18px 4px;scroll-padding:0 18px;scrollbar-width:none}
 +.carousel::-webkit-scrollbar{display:none}
 +.carousel > *{scroll-snap-align:start;flex:none}
-+.rows .row{margin-bottom:14px}
-+.rowhead{display:flex;align-items:baseline;gap:8px;margin:0 2px 6px;font-size:14px;color:var(--muted)}
-+.rowhead b{color:var(--ink);font-size:15px}
-+.rowhead .pill{background:var(--line);border-radius:999px;padding:1px 8px;font-size:12px}
++.rows .row{margin-bottom:18px}
++.rowhead{display:flex;align-items:baseline;gap:8px;margin:0 0 8px;padding-top:10px;border-top:1px solid var(--line)}
++.rowhead b{font:600 16px var(--sans)}
++.pill{border:1px solid var(--line);padding:1px 6px}
 +.rows .carousel .tile{width:84px}
-+.upnext .qi{width:92px;padding:0;background:none;text-align:left;color:var(--ink)}
-+.upnext .qart{position:relative;aspect-ratio:9/16;border-radius:10px;overflow:hidden;background:var(--line) center/cover no-repeat;border:1px solid var(--line)}
-+.upnext .qi.now .qart{outline:2px solid var(--good);outline-offset:2px}
-+.upnext .qart .ql{position:absolute;inset:auto 0 0 0;padding:16px 6px 6px;font-size:11px;font-weight:700;color:#fff;
-+  background:linear-gradient(transparent,rgba(0,0,0,.6))}
-+.upnext .qart.live-art{background:linear-gradient(135deg,#ff6f61,#7850ff 55%,#3cdcff)}
-+.upnext .qart.live-music{background:linear-gradient(160deg,#1d2b3a,#c26b2f)}
-+.upnext .qart .qicon{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:30px;opacity:.9}
-+.upnext .qwhen{font-size:12px;font-weight:700;margin-top:6px}
++.tile{position:relative;aspect-ratio:9/16;overflow:hidden;background:var(--fill);padding:0;border-radius:3px;display:block}
++.tile img{width:100%;height:100%;object-fit:cover;display:block}
++.tile .badge{position:absolute;left:0;top:0;background:var(--ink);color:var(--bg);font-size:9px;padding:3px 5px}
++.tile .badge.cur{background:var(--accent);color:#fff}
++.tile .badge.warn{background:var(--warn);color:#fff}
++.tile .badge.gif{left:auto;right:0;top:auto;bottom:0}
++.tile .badge.offb{left:auto;right:0;top:auto;bottom:0;background:var(--muted)}
++.tile.off img{opacity:.35;filter:grayscale(1)}
++.tile .vid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;color:var(--muted);font-size:12px}
++.tile .vid svg{width:24px;height:24px}
++.tile.pending{opacity:.6}
++.tile .bar{position:absolute;left:0;bottom:0;height:3px;background:var(--accent);transition:width .2s}
++.tile .check{position:absolute;right:5px;top:5px;width:20px;height:20px;border:2px solid #fff;background:rgba(0,0,0,.3);display:none}
++.selecting .tile .check{display:block}
++.tile.picked .check{background:var(--accent);border-color:var(--accent)}
++.tile.picked .check:after{content:"";position:absolute;left:5px;top:1px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
++.tile.picked img{opacity:.7}
++.upnext .qi{width:96px;text-align:left}
++.upnext .qart{position:relative;aspect-ratio:9/16;overflow:hidden;background:var(--fill) center/cover no-repeat;border-radius:3px}
++.upnext .qi.now .qart{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
++.upnext .qi.now{margin:4px 6px 0 4px}
++.upnext .qart .ql{position:absolute;left:0;top:0;background:var(--accent);color:#fff;font:700 9px var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:3px 5px}
++.upnext .qart.live-art,.upnext .qart.live-music{background-color:var(--ink)}
++.upnext .qart .qicon{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--bg);
++  font:600 15px/1.15 var(--serif);padding:8px}
++.upnext .qwhen{margin-top:7px;color:var(--ink)}
 +.upnext .qname{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-+.upnext .qmore{width:92px;aspect-ratio:9/16;border-radius:10px;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;
-+  text-align:center;font-size:12px;color:var(--muted);padding:8px}
-+.upnote{font-size:13px;color:var(--muted);margin:-2px 2px 8px}
-+.upnote:empty{display:none}
-+.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translate(-50%,-40px);
-+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;
-+  transition:all .25s;z-index:20;max-width:90vw;text-align:center}
++.upnext .qmore{width:96px;aspect-ratio:9/16;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;
++  text-align:center;font-size:12px;color:var(--muted);padding:8px;border-radius:3px}
++.empty{padding:26px 8px;text-align:center;color:var(--muted);border:1px dashed var(--line)}
++.empty b{display:block;color:var(--ink);font:600 18px var(--serif);margin-bottom:4px}
++
++/* library */
++.addrow{display:flex;gap:8px;align-items:stretch;margin-bottom:6px}
++.addrow .primary{flex:1;width:auto}
++
++/* lists (settings rows, extras) */
++.listrow,.setrow{display:block;padding:14px 0;border-top:1px solid var(--line)}
++.listrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
++.listrow b,.xt b{display:block;font-weight:600;font-size:16px}
++.listrow small,.xt small{display:block;margin-top:3px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px}
++.list{border-bottom:1px solid var(--line)}
++.setlabel{font-weight:600;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center;gap:8px}
++.setlabel small{text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;font-weight:400}
++.hours{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:14px;color:var(--muted)}
++.hours select,.namerow input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--ink);border-radius:6px;padding:8px 10px}
++.hours select{flex:1}
++.namerow{display:flex;gap:8px;align-items:center}
++.namerow input{flex:1;min-width:0}
++.info{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0;font-size:14px}
++.info dd{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
++.mrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
++.mrow b{display:block;font-weight:600}.mrow small{display:block;color:var(--muted);font-size:13px;margin-top:2px}
++.mrow .btn{flex:none;min-width:96px}
++
++/* extras */
++.xitem{border-top:1px solid var(--ink)}
++.xitem:last-of-type{border-bottom:1px solid var(--ink)}
++.xhead{display:flex;align-items:center;gap:12px;padding:14px 0}
++.xtoggle{flex:1;min-width:0;display:flex;align-items:center;gap:10px;text-align:left}
++.xt{flex:1;min-width:0}
++.xt b{font:600 20px/1.15 var(--serif)}
++.chev{width:9px;height:9px;border:solid var(--ink);border-width:0 2px 2px 0;transform:rotate(45deg);transition:.15s;flex:none;margin:0 4px 4px}
++.xitem.open .chev{transform:rotate(225deg);margin:4px 4px 0}
++.xbody{display:none;padding:2px 0 18px}
++.xitem.open .xbody,body.all .xbody{display:block}
++.xbody p{margin:0 0 12px;color:var(--muted);font-size:14px}
++.xbody .seg{margin-bottom:12px;display:flex}
++.xbody .seg button{flex:1}
++.xbody .chips{margin-bottom:12px}
++.xbody .sub{font:600 14px var(--sans);margin:16px 0 8px;display:flex;justify-content:space-between;align-items:baseline}
++.xbody .sub small{font-weight:400;color:var(--muted)}
++.progress{font-size:13px;color:var(--muted);margin-top:8px}
++.progress:empty{display:none}
++.autorow{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;padding:12px 0 0}
++.steps{margin:0 0 12px;padding-left:20px;font-size:14px}
++.steps li{margin-bottom:8px}
++code{font-family:var(--mono);font-size:12px;border:1px solid var(--line);padding:2px 5px;word-break:break-all}
++.who{display:flex;justify-content:flex-end;margin-bottom:6px}
++.artwrap{display:flex;gap:14px;align-items:flex-start;margin-bottom:12px}
++.artprev{width:108px;aspect-ratio:9/16;overflow:hidden;background:#000;flex:none;border:1px solid var(--ink)}
++.artprev iframe{width:540px;height:960px;border:0;transform:scale(.2);transform-origin:0 0;pointer-events:none}
++.artside{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
++.artside .seg{flex-direction:column;margin:0}
++.artside .seg button{border-left:0;border-top:1px solid var(--line);text-align:left}
++.artside .seg button:first-child{border-top:0}
++.artname{font:600 18px/1.2 var(--serif)}
++.chips.styles .chip{padding:6px 10px;font-size:13px}
++
++/* select bar, sheets, toast */
++.selbar{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--bg);border-top:1px solid var(--ink);
++  padding:12px 18px calc(env(safe-area-inset-bottom) + 12px);display:none;gap:8px;grid-template-columns:1fr 1fr;z-index:9}
++.selecting .selbar{display:grid}
++.selbar .btn.danger{background:var(--bad);color:#fff}
++.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:10}
++.sheet{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--bg);border-top:2px solid var(--ink);
++  padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);transform:translateY(100%);
++  transition:transform .22s ease,visibility 0s .22s;z-index:11;visibility:hidden}
++.sheet.open{transform:none;visibility:visible;transition:transform .22s ease}
++.sheet-bg.open{display:block}
++.sheet .preview{width:100%;max-height:55vh;object-fit:contain;background:#000;display:block}
++.sheet .meta{color:var(--muted);font-size:13px;margin:10px 0;word-break:break-all}
++.sheet .warnbox{border:1px solid var(--warn);padding:10px;font-size:13px;margin-bottom:10px;white-space:pre-wrap}
++.sheet .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
++.sheet .row3{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:8px}
++.ctitle{font:600 20px/1.25 var(--serif);margin:2px 0 6px}
++.cbody{color:var(--muted);font-size:14px;margin:0 0 16px}
++.cbody:empty{display:none}
++.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translate(-50%,-60px);
++  background:var(--ink);color:var(--bg);padding:10px 14px;font-size:14px;opacity:0;border-radius:6px;
++  transition:all .2s;z-index:20;max-width:90vw;text-align:center}
 +.toast.show{opacity:1;transform:translate(-50%,0)}
-+.offline{display:none;background:var(--bad);color:#fff;border-radius:12px;padding:10px 12px;font-size:14px;margin-bottom:12px}
 +</style>
 +</head>
-+<body>
-+<header>
++<body data-tab="now">
++<header class="mast">
++  <div class="kicker"><span class="dot" id="dot"></span><span id="statusText">Connecting…</span><span id="sched"></span></div>
 +  <h1 id="title">Frame</h1>
-+  <div class="hinfo">
-+    <div><span class="dot" id="dot"></span><span id="statusText">Connecting…</span></div>
-+    <div id="sched"></div>
-+  </div>
 +</header>
 +
 +<div class="offline" id="offline">Can’t reach the frame. Make sure your phone is on the same Wi-Fi.</div>
 +
-+<div class="card nowcard">
-+  <div class="nowtop">
++<!-- ============ NOW ============ -->
++<section class="tab" data-tab="now">
++  <div class="nowpanel">
 +    <div class="thumb" id="nowThumb"></div>
 +    <div class="nowtext">
-+      <div class="label">On the frame now</div>
++      <div class="kicker">On the frame now</div>
 +      <div class="name" id="nowName">—</div>
++      <div class="nowbtns">
++        <button class="btn" id="btnNext">Next</button>
++        <button class="btn" id="btnScreen"><span id="screenLabel">Turn off</span></button>
++      </div>
 +    </div>
-+    <button class="iconbtn" id="btnNext" aria-label="Next picture">
-+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/></svg>
-+    </button>
-+    <button class="iconbtn" id="btnScreen" aria-label="Turn the screen off">
-+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>
-+    </button>
 +  </div>
 +  <div class="bright" id="brightRow">
-+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 5v1M12 18v1M5 12h1M18 12h1"/></svg>
++    <span class="kicker">Brightness</span>
 +    <input type="range" id="bright" min="1" max="8" step="1" value="5" aria-label="Brightness">
-+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
 +    <span id="brightLabel"></span>
 +  </div>
-+</div>
 +
-+<div class="sectionhead" style="margin-top:6px"><h2>Up next</h2><span class="count" id="upWhen"></span></div>
-+<div class="upnote" id="upNote"></div>
-+<div class="carousel upnext" id="upNext"></div>
++  <div class="sectionhead"><h2>Up next</h2><span class="count" id="upWhen"></span></div>
++  <div class="upnote" id="upNote"></div>
++  <div class="carousel upnext" id="upNext"></div>
++</section>
 +
-+<div class="addrow" style="margin-top:14px">
-+  <button class="primary" id="btnAdd">
-+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-+    Add photos
-+  </button>
-+  <div class="seg" role="group" aria-label="How photos fit the frame">
-+    <button id="fitFill" class="sel">Fill</button>
-+    <button id="fitWhole">Whole</button>
-+  </div>
-+</div>
-+<input type="file" id="picker" accept="image/*,video/*" multiple hidden>
-+
-+
-+<div class="sectionhead"><h2>On rotation <span class="count" id="count"></span></h2><button class="selbtn" id="btnSelect" hidden>Select</button></div>
-+<div class="rows" id="grid"></div>
-+<div class="card empty" id="empty" hidden><b>No photos yet</b>Tap “Add photos” to put your first picture on the wall.</div>
-+
-+<div class="sectionhead"><h2>Settings</h2></div>
-+<div class="card settings" id="settings">
-+  <div class="setrow">
-+    <div class="setlabel">Show on the frame</div>
-+    <div class="srcrow"><span><b>Photos</b><small id="srcCountPhotos"></small></span><label class="switch"><input type="checkbox" data-src="photos"><span></span></label></div>
-+    <div class="srcrow"><span><b>Generative art</b><small id="srcCountArt">Live, different every time</small></span><label class="switch"><input type="checkbox" data-src="art"><span></span></label></div>
-+    <div class="srcrow"><span><b>NYT front page</b><small id="srcCountNyt"></small></span><label class="switch"><input type="checkbox" data-src="nyt"><span></span></label></div>
-+    <div class="srcrow"><span><b>Spotify stills</b><small id="srcCountSpotify"></small></span><label class="switch"><input type="checkbox" data-src="spotify"><span></span></label></div>
-+    <div class="srcrow"><span><b>Live music</b><small id="srcCountMusic">Spotify, as it plays</small></span><label class="switch"><input type="checkbox" data-src="music"><span></span></label></div>
-+    <div id="artOftenRow" hidden style="padding-top:6px">
-+      <div class="chips" id="artOften">
-+        <button class="chip" data-c="1">Art now and then</button>
-+        <button class="chip" data-c="3">Art often</button>
-+        <button class="chip" data-c="6">Mostly art</button>
-+      </div>
++<!-- ============ LIBRARY ============ -->
++<section class="tab" data-tab="library">
++  <div class="sectionhead"><h2>Library <span class="count" id="count"></span></h2><button class="selbtn" id="btnSelect" hidden>Select</button></div>
++  <div class="addrow">
++    <button class="primary" id="btnAdd">
++      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"><path d="M12 5v14M5 12h14"/></svg>
++      Add photos
++    </button>
++    <div class="seg" role="group" aria-label="How photos fit the frame">
++      <button id="fitFill" class="sel">Fill</button>
++      <button id="fitWhole">Whole</button>
 +    </div>
 +  </div>
-+  <div class="setrow">
-+    <div class="setlabel">Change picture every</div>
-+    <div class="chips" id="intervalChips"></div>
++  <input type="file" id="picker" accept="image/*,video/*" multiple hidden>
++  <div class="listrow" style="border-top:0">
++    <span><b>Show photos on the frame</b><small id="srcCountPhotos"></small></span>
++    <label class="switch"><input type="checkbox" data-src="photos"><span></span></label>
 +  </div>
-+  <div class="setrow">
-+    <div class="setlabel"><span>Sleep at night <small id="sleepSummary"></small></span>
-+      <label class="switch"><input type="checkbox" id="sleepOn"><span></span></label></div>
-+    <div class="hours" id="sleepHours" hidden>
-+      <span>Off</span><select id="sleepStart" aria-label="Screen off at"></select><span>On</span><select id="sleepEnd" aria-label="Screen back on at"></select>
++  <div class="rows" id="grid"></div>
++  <div class="empty" id="empty" hidden><b>No photos yet</b>Tap “Add photos” to put your first picture on the wall.</div>
++</section>
++
++<!-- ============ EXTRAS ============ -->
++<section class="tab" data-tab="extras">
++  <div class="sectionhead"><h2>Extras</h2><span class="count">Switch on what you like</span></div>
++
++  <div class="xitem" id="artCard">
++    <div class="xhead">
++      <button class="xtoggle" aria-expanded="false"><span class="xt"><b>Generative art</b><small id="srcCountArt">Live, different every time</small></span><span class="chev"></span></button>
++      <label class="switch"><input type="checkbox" data-src="art"><span></span></label>
 +    </div>
-+  </div>
-+  <div class="setrow" id="tzRow" hidden>
-+    <div class="setlabel"><span>Time zone <small id="tzName"></small></span></div>
-+    <button class="linkbtn" id="tzFix"></button>
-+  </div>
-+  <div class="setrow">
-+    <div class="setlabel">Frame name</div>
-+    <div class="namerow"><input id="nameInput" maxlength="64" placeholder="e.g. Living room" autocomplete="off"><button class="btn small" id="nameSave">Save</button></div>
-+  </div>
-+  <div class="setrow">
-+    <div class="setlabel">About this frame</div>
-+    <dl class="info" id="info"></dl>
-+  </div>
-+  <div class="setrow">
-+    <div class="setlabel">Update the frame</div>
-+    <div class="namerow"><button class="btn small" id="updPick">Choose APK…</button><span class="artname" id="updStatus" style="align-self:center"></span></div>
-+    <input type="file" id="updFile" accept=".apk,application/vnd.android.package-archive" hidden>
-+  </div>
-+</div>
-+
-+<div class="sectionhead"><h2>Extras</h2></div>
-+<div class="card extras" id="nytCard">
-+  <h3>The New York Times front page</h3>
-+  <p>Today’s print front page, made for the frame. Replaces yesterday’s.</p>
-+  <div class="seg" role="group" aria-label="Front page style">
-+    <button data-style="clean">Clean</button>
-+    <button data-style="glitch">Glitch</button>
-+    <button data-style="gif">Animated</button>
-+  </div>
-+  <button class="primary" id="nytGo">Put today’s front page on the frame</button>
-+  <div class="progress" id="nytStatus"></div>
-+  <div class="autorow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="nytAuto"><span></span></label></div>
-+</div>
-+
-+<div class="card extras" id="artCard">
-+  <h3>Generative art</h3>
-+  <p>Animated pieces drawn live on the frame. Each time one comes up it picks a new style and seed.</p>
-+  <div class="artwrap">
-+    <div class="artprev"><iframe id="artFrame" title="Generative art preview" scrolling="no"></iframe></div>
-+    <div class="artside">
-+      <div class="artname" id="artName">Loading…</div>
-+      <button class="btn" id="artShuffle">Shuffle</button>
-+      <button class="btn" id="artKeep">Keep this one</button>
-+    </div>
-+  </div>
-+  <div class="setlabel" style="font-size:14px">Styles on the frame <small id="artStylesNote">all</small></div>
-+  <div class="chips styles" id="artStyles"></div>
-+  <div class="autorow"><span>Include art in the rotation</span><label class="switch"><input type="checkbox" id="artOn"><span></span></label></div>
-+</div>
-+
-+<div class="card extras" id="spCard">
-+  <h3>Spotify</h3>
-+  <div id="spSetup" hidden>
-+    <p>Show the albums you’ve been playing, or what’s on right now. One-time setup, about 5 minutes:</p>
-+    <ol class="steps">
-+      <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify developer dashboard</a>, sign in, and tap <b>Create app</b> (any name, tick <b>Web API</b>).</li>
-+      <li>Add this <b>Redirect URI</b>:<br><code id="spRedirectShow"></code> <button class="linkbtn" id="spCopy">Copy</button></li>
-+      <li>Copy the app’s <b>Client ID</b> and paste it here:</li>
-+    </ol>
-+    <div class="namerow"><input id="spClient" placeholder="Client ID" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn small go" id="spConnect">Connect</button></div>
-+    <p style="margin-top:10px"><button class="linkbtn" id="spRedirectEdit">Use a different redirect address</button></p>
-+  </div>
-+  <div id="spReady" hidden>
-+    <div class="who"><span id="spWho">Connected on the frame</span><button class="linkbtn" id="spDisconnect">Disconnect</button></div>
-+
-+    <div class="setlabel" style="font-size:14px;margin-top:4px">Live on the frame</div>
-+    <div class="artwrap">
-+      <div class="artprev"><iframe id="musicFrame" title="Live music preview" scrolling="no"></iframe></div>
-+      <div class="artside">
-+        <div class="seg" role="group" aria-label="Live style" id="musicStyles" style="flex-direction:column;align-items:stretch">
-+          <button data-ms="kinetic">Kinetic Type</button>
-+          <button data-ms="liquid">Liquid Light</button>
-+          <button data-ms="wall">Album Wall</button>
++    <div class="xbody">
++      <p>Animated pieces drawn live on the frame. Each time one comes up it picks a new style and seed.</p>
++      <div class="artwrap">
++        <div class="artprev"><iframe id="artFrame" title="Generative art preview" scrolling="no"></iframe></div>
++        <div class="artside">
++          <div class="artname" id="artName">Loading…</div>
++          <button class="btn" id="artShuffle">Shuffle</button>
++          <button class="btn" id="artKeep">Keep this one</button>
 +        </div>
 +      </div>
++      <div id="artOftenRow" hidden>
++        <div class="sub">How often</div>
++        <div class="chips" id="artOften">
++          <button class="chip" data-c="1">Now and then</button>
++          <button class="chip" data-c="3">Often</button>
++          <button class="chip" data-c="6">Mostly art</button>
++        </div>
++      </div>
++      <div class="sub">Styles on the frame <small id="artStylesNote">all</small></div>
++      <div class="chips styles" id="artStyles"></div>
 +    </div>
-+    <div class="setlabel" style="font-size:14px">Lead with</div>
-+    <div class="chips" id="musicLead">
-+      <button class="chip" data-ml="artist">Artist</button>
-+      <button class="chip" data-ml="track">Song</button>
-+      <button class="chip" data-ml="date">Date</button>
-+    </div>
-+    <div class="autorow"><span>Show live music on the frame</span><label class="switch"><input type="checkbox" id="musicOn"><span></span></label></div>
-+    <div class="autorow"><span>Take over the frame while music plays</span><label class="switch"><input type="checkbox" id="musicTake"><span></span></label></div>
-+
-+    <div class="setlabel" style="font-size:14px;margin-top:16px">Recently played still</div>
-+    <div class="seg" role="group" aria-label="Still style">
-+      <button data-sp="grid">Album grid</button>
-+      <button data-sp="anim">Animated grid</button>
-+    </div>
-+    <div class="chips" id="spSizes">
-+      <button class="chip" data-n="9">9 albums</button>
-+      <button class="chip" data-n="12">12 albums</button>
-+      <button class="chip" data-n="20">20 albums</button>
-+    </div>
-+    <button class="primary" id="spGo">Put it on the frame</button>
-+    <div class="progress" id="spStatus"></div>
-+    <div class="autorow" id="spAutoRow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="spAuto"><span></span></label></div>
 +  </div>
-+</div>
++
++  <div class="xitem" id="spCard">
++    <div class="xhead">
++      <button class="xtoggle" aria-expanded="false"><span class="xt"><b>Live music</b><small id="spWho">Spotify, as it plays</small></span><span class="chev"></span></button>
++      <label class="switch"><input type="checkbox" data-src="music"><span></span></label>
++    </div>
++    <div class="xbody">
++      <div id="spSetup" hidden>
++        <p>Show what’s playing on Spotify, or the albums you’ve played lately. One-time setup, about 5 minutes:</p>
++        <ol class="steps">
++          <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify developer dashboard</a>, sign in, and tap <b>Create app</b> (any name, tick <b>Web API</b>).</li>
++          <li>Add this <b>Redirect URI</b>:<br><code id="spRedirectShow"></code> <button class="linkbtn" id="spCopy">Copy</button></li>
++          <li>Copy the app’s <b>Client ID</b> and paste it here:</li>
++        </ol>
++        <div class="namerow"><input id="spClient" placeholder="Client ID" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn small go" id="spConnect">Connect</button></div>
++        <p style="margin-top:10px"><button class="linkbtn" id="spRedirectEdit">Use a different redirect address</button></p>
++      </div>
++      <div id="spReady" hidden>
++        <div class="artwrap">
++          <div class="artprev"><iframe id="musicFrame" title="Live music preview" scrolling="no"></iframe></div>
++          <div class="artside">
++            <div class="seg" role="group" aria-label="Live style" id="musicStyles">
++              <button data-ms="kinetic">Kinetic Type</button>
++              <button data-ms="liquid">Liquid Light</button>
++              <button data-ms="wall">Album Wall</button>
++            </div>
++          </div>
++        </div>
++        <div class="sub">Lead with</div>
++        <div class="chips" id="musicLead">
++          <button class="chip" data-ml="artist">Artist</button>
++          <button class="chip" data-ml="track">Song</button>
++          <button class="chip" data-ml="date">Date</button>
++        </div>
++        <div class="autorow" style="padding-top:0"><span>Take over the frame while music plays</span><label class="switch"><input type="checkbox" id="musicTake"><span></span></label></div>
++
++        <div class="sub" style="margin-top:22px">Recently played still <small id="srcCountSpotify"></small></div>
++        <div class="seg" role="group" aria-label="Still style">
++          <button data-sp="grid">Album grid</button>
++          <button data-sp="anim">Animated grid</button>
++        </div>
++        <div class="chips" id="spSizes">
++          <button class="chip" data-n="9">9 albums</button>
++          <button class="chip" data-n="12">12 albums</button>
++          <button class="chip" data-n="20">20 albums</button>
++        </div>
++        <button class="primary" id="spGo">Put it on the frame</button>
++        <div class="progress" id="spStatus"></div>
++        <div class="autorow"><span>Keep the still in the rotation</span><label class="switch"><input type="checkbox" data-src="spotify"><span></span></label></div>
++        <div class="autorow" id="spAutoRow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="spAuto"><span></span></label></div>
++        <div class="who" style="margin-top:14px"><button class="linkbtn" id="spDisconnect">Disconnect Spotify</button></div>
++      </div>
++    </div>
++  </div>
++
++  <div class="xitem" id="nytCard">
++    <div class="xhead">
++      <button class="xtoggle" aria-expanded="false"><span class="xt"><b>The New York Times</b><small id="srcCountNyt">Today’s front page</small></span><span class="chev"></span></button>
++      <label class="switch"><input type="checkbox" data-src="nyt"><span></span></label>
++    </div>
++    <div class="xbody">
++      <p>Today’s print front page, made for the frame. Replaces yesterday’s.</p>
++      <div class="seg" role="group" aria-label="Front page style">
++        <button data-style="clean">Clean</button>
++        <button data-style="glitch">Glitch</button>
++        <button data-style="gif">Animated</button>
++      </div>
++      <button class="primary" id="nytGo">Put today’s front page on the frame</button>
++      <div class="progress" id="nytStatus"></div>
++      <div class="autorow"><span>Refresh whenever I open this page</span><label class="switch"><input type="checkbox" id="nytAuto"><span></span></label></div>
++    </div>
++  </div>
++</section>
++
++<!-- ============ FRAME ============ -->
++<section class="tab" data-tab="frame">
++  <div class="sectionhead"><h2>Schedule</h2></div>
++  <div class="list">
++    <div class="setrow">
++      <div class="setlabel">Change picture every</div>
++      <div class="chips" id="intervalChips"></div>
++    </div>
++    <div class="setrow">
++      <div class="setlabel"><span>Sleep at night <small id="sleepSummary"></small></span>
++        <label class="switch"><input type="checkbox" id="sleepOn"><span></span></label></div>
++      <div class="hours" id="sleepHours" hidden>
++        <span>Off</span><select id="sleepStart" aria-label="Screen off at"></select><span>On</span><select id="sleepEnd" aria-label="Screen back on at"></select>
++      </div>
++    </div>
++    <div class="setrow" id="tzRow" hidden>
++      <div class="setlabel"><span>Time zone <small id="tzName"></small></span></div>
++      <button class="linkbtn" id="tzFix"></button>
++    </div>
++  </div>
++
++  <div class="sectionhead"><h2>This frame</h2></div>
++  <div class="list">
++    <div class="setrow">
++      <div class="setlabel">Name</div>
++      <div class="namerow"><input id="nameInput" maxlength="64" placeholder="e.g. Living room" autocomplete="off"><button class="btn small" id="nameSave">Save</button></div>
++    </div>
++    <div class="setrow">
++      <dl class="info" id="info"></dl>
++    </div>
++  </div>
++
++  <div class="sectionhead"><h2>Maintenance</h2></div>
++  <div class="list">
++    <div class="mrow"><span><b>Update the frame</b><small id="updStatus">Install a newer APK from this phone</small></span><button class="btn small" id="updPick">Choose APK…</button></div>
++    <input type="file" id="updFile" accept=".apk,application/vnd.android.package-archive" hidden>
++    <div class="mrow"><span><b>Restart the app</b><small>Fixes a stuck picture. Takes a few seconds</small></span><button class="btn small" id="mRestart">Restart</button></div>
++    <div class="mrow"><span><b>Reboot the frame</b><small>A full restart. Back in about a minute</small></span><button class="btn small danger" id="mReboot">Reboot</button></div>
++    <div class="mrow"><span><b>Logs and diagnostics</b><small>The original technical page</small></span><a class="btn small" href="/advanced">Open</a></div>
++  </div>
++</section>
++
++<nav class="tabs" id="tabs" aria-label="Sections">
++  <button data-go="now">Now</button>
++  <button data-go="library">Library</button>
++  <button data-go="extras">Extras</button>
++  <button data-go="frame">Frame</button>
++</nav>
 +
 +<div class="selbar" id="selbar">
 +  <button class="btn" id="selCancel">Cancel</button>
 +  <button class="btn danger" id="selRemove" disabled>Remove</button>
 +</div>
-+
-+<footer id="footer"><a href="/advanced">Advanced (troubleshooting)</a></footer>
 +
 +<div class="sheet-bg" id="sheetBg"></div>
 +<div class="sheet" id="sheet" role="dialog" aria-modal="true">
@@ -4089,6 +4181,7 @@ index 0000000..6abebf7
 +</div>
 +<div class="sheet" id="confirmSheet" role="alertdialog" aria-modal="true">
 +  <div class="ctitle" id="confirmText"></div>
++  <p class="cbody" id="confirmBody"></p>
 +  <div class="row">
 +    <button class="btn" id="confirmNo">Cancel</button>
 +    <button class="btn danger" id="confirmYes">Remove</button>
@@ -4101,6 +4194,27 @@ index 0000000..6abebf7
 +  "use strict";
 +  var W = 1080, H = 1920;                       // the EO panel, portrait
 +  var $ = function(id){ return document.getElementById(id); };
++  // ---------- tabs and expandable extras ----------
++  function showTab(t){
++    document.body.setAttribute("data-tab", t);
++    Array.prototype.forEach.call(document.querySelectorAll("#tabs button"), function(b){ b.classList.toggle("sel", b.dataset.go === t); });
++    try { localStorage.setItem("eoTab", t); } catch(e) {}
++    window.scrollTo(0, 0);
++  }
++  function openExtra(id, open){
++    var x = $(id); if (!x) return;
++    var on = open === undefined ? !x.classList.contains("open") : open;
++    x.classList.toggle("open", on);
++    x.querySelector(".xtoggle").setAttribute("aria-expanded", on ? "true" : "false");
++  }
++  Array.prototype.forEach.call(document.querySelectorAll("#tabs button"), function(b){ b.onclick = function(){ showTab(b.dataset.go); }; });
++  Array.prototype.forEach.call(document.querySelectorAll(".xitem"), function(x){ x.querySelector(".xtoggle").onclick = function(){ openExtra(x.id); }; });
++  (function(){
++    var t = "now"; try { t = localStorage.getItem("eoTab") || "now"; if (localStorage.getItem("eoAll") === "1") document.body.classList.add("all"); } catch(e) {}
++    if (/spotify_code|[?&]code=/.test(location.hash + location.search)) { t = "extras"; }
++    showTab(/^(now|library|extras|frame)$/.test(t) ? t : "now");
++  })();
++
 +  var state = null, files = [], pending = [], sheetName = null, selecting = false, picked = {};
 +  var fit = "fill";
 +  try { fit = localStorage.getItem("fit") || "fill"; } catch(e) {}
@@ -4168,7 +4282,7 @@ index 0000000..6abebf7
 +    var every = cfg.intervalMinutes ? "Every " + intervalLabel(cfg.intervalMinutes) : "";
 +    $("statusText").textContent = on ? (every || "On") : "Screen off";
 +    $("sched").textContent = quiet;
-+    $("btnScreen").classList.toggle("off", !on);
++    $("btnScreen").classList.toggle("off", !on); $("screenLabel").textContent = on ? "Turn off" : "Turn on";
 +    $("btnScreen").setAttribute("aria-label", on ? "Turn the screen off" : "Turn the screen on");
 +    $("brightRow").hidden = br.supported === false;
 +    if (typeof br.step === "number" && !brightDragging && Date.now() - brightSetAt > 4000) { $("bright").value = br.step + 1; $("brightLabel").textContent = (br.step + 1) + "/8"; brightFill(); }
@@ -4262,21 +4376,21 @@ index 0000000..6abebf7
 +    var b = document.createElement("button"); b.className = "qi" + (isNow ? " now" : "");
 +    var art = document.createElement("div"); art.className = "qart";
 +    var name = "";
-+    if (item.kind === "art-live") { art.classList.add("live-art"); art.innerHTML = '<div class="qicon">✦</div>'; name = "Generative art · live"; }
++    if (item.kind === "art-live") { art.classList.add("live-art"); art.innerHTML = '<div class="qicon">Live art</div>'; name = "Generative art"; }
 +    else if (item.kind === "music") {
 +      art.classList.add("live-music");
 +      var cur = (music && (music.current || music.last)) || null;
-+      if (cur && cur.art) art.style.backgroundImage = 'url("' + musicImg(cur.art) + '")'; else art.innerHTML = '<div class="qicon">♪</div>';
++      if (cur && cur.art) art.style.backgroundImage = 'url("' + musicImg(cur.art) + '")'; else art.innerHTML = '<div class="qicon">Live music</div>';
 +      name = "Live music" + (cur ? " · " + cur.artist : "");
 +    }
 +    else if (item.name) { art.style.backgroundImage = VIDEO.test(item.name) ? "" : 'url("' + thumbUrl(item.name) + '")'; name = friendlyName(item.name); }
-+    else { art.innerHTML = '<div class="qicon">◻︎</div>'; name = item.backendId || "Web page"; }
++    else { art.innerHTML = '<div class="qicon">Web page</div>'; name = item.backendId || "Web page"; }
 +    if (isNow) { var l = document.createElement("div"); l.className = "ql"; l.textContent = "On now"; art.appendChild(l); }
 +    var w = document.createElement("div"); w.className = "qwhen"; w.textContent = label;
 +    var nm = document.createElement("div"); nm.className = "qname"; nm.textContent = name;
 +    b.appendChild(art); b.appendChild(w); b.appendChild(nm);
 +    var f = item.name && files.filter(function(x){ return x.name === item.name; })[0];
-+    b.onclick = function(){ if (f) openSheet(f); else if (item.kind === "art-live") $("artCard").scrollIntoView({behavior: "smooth", block: "center"}); else if (item.kind === "music") $("spCard").scrollIntoView({behavior: "smooth", block: "center"}); };
++    b.onclick = function(){ if (f) openSheet(f); else if (item.kind === "art-live") { showTab("extras"); openExtra("artCard", true); } else if (item.kind === "music") { showTab("extras"); openExtra("spCard", true); } };
 +    return b;
 +  }
 +  function renderQueue(){
@@ -4362,8 +4476,8 @@ index 0000000..6abebf7
 +
 +  // ---------- on-page confirm (no browser dialogs) ----------
 +  var confirmResolve = null;
-+  function askConfirm(text, yesLabel){
-+    $("confirmText").textContent = text; $("confirmYes").textContent = yesLabel || "OK";
++  function askConfirm(text, yesLabel, body){
++    $("confirmText").textContent = text; $("confirmYes").textContent = yesLabel || "OK"; $("confirmBody").textContent = body || "";
 +    $("sheetBg").classList.add("open"); $("confirmSheet").classList.add("open");
 +    return new Promise(function(res){ confirmResolve = res; });
 +  }
@@ -4858,10 +4972,10 @@ index 0000000..6abebf7
 +    Array.prototype.forEach.call(document.querySelectorAll("#spSizes .chip"), function(b){ b.classList.toggle("sel", +b.dataset.n === spN); });
 +    Array.prototype.forEach.call(document.querySelectorAll("#musicStyles [data-ms]"), function(b){ b.classList.toggle("sel", b.dataset.ms === (sources.musicStyle || "kinetic")); });
 +    Array.prototype.forEach.call(document.querySelectorAll("#musicLead [data-ml]"), function(b){ b.classList.toggle("sel", b.dataset.ml === (sources.musicLead || "artist")); });
-+    $("musicOn").checked = !!sources.music; $("musicTake").checked = sources.musicTakeover !== false;
++    $("musicTake").checked = sources.musicTakeover !== false;
 +    $("spAuto").checked = ls("spAuto") === "1";
 +    var c = music.current, l = music.last;
-+    $("spWho").textContent = c ? "Playing: " + c.title + " — " + c.artist : l ? "Last played: " + l.artist : music.error ? "Connected, but the frame can’t reach Spotify right now" : "Connected on the frame";
++    $("spWho").textContent = !on ? "Connect Spotify to use this" : c ? "Playing: " + c.title + " — " + c.artist : l ? "Last played: " + l.artist : music.error ? "Connected, but the frame can’t reach Spotify right now" : "Spotify connected";
 +  }
 +  function musicPreview(){
 +    var st = sources.musicStyle || "kinetic", ld = sources.musicLead || "artist";
@@ -4874,7 +4988,6 @@ index 0000000..6abebf7
 +  Array.prototype.forEach.call(document.querySelectorAll("#musicLead [data-ml]"), function(b){
 +    b.onclick = function(){ saveSources({musicLead: b.dataset.ml}, "Leading with " + b.textContent.toLowerCase()); spRender(); musicPreview(); };
 +  });
-+  $("musicOn").onchange = function(){ saveSources({music: this.checked}, "Live music " + (this.checked ? "on" : "off")); };
 +  $("musicTake").onchange = function(){ saveSources({musicTakeover: this.checked}, this.checked ? "Music takes over while playing" : "Music stays in the rotation"); };
 +  Array.prototype.forEach.call(document.querySelectorAll("#spCard [data-sp]"), function(b){ b.onclick = function(){ spStyle = b.dataset.sp; ls("spStyle", spStyle); spRender(); }; });
 +  Array.prototype.forEach.call(document.querySelectorAll("#spSizes .chip"), function(b){ b.onclick = function(){ spN = +b.dataset.n; ls("spN", String(spN)); spRender(); }; });
@@ -4928,7 +5041,7 @@ index 0000000..6abebf7
 +    if (err) { toast("Spotify: " + (err === "access_denied" ? "you cancelled" : err), 4000); return; }
 +    var st = {}; try { st = JSON.parse(atob(state.replace(/-/g, "+").replace(/_/g, "/"))); } catch(e) {}
 +    if (!st.n || st.n !== ls("spNonce")) { toast("That Spotify login didn’t start on this phone — try Connect again", 4500); return; }
-+    $("spCard").scrollIntoView({block: "center"});
++    showTab("extras"); openExtra("spCard", true);
 +    spSay("Finishing the Spotify connection…");
 +    fetch("https://accounts.spotify.com/api/token", {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"},
 +      body: new URLSearchParams({grant_type: "authorization_code", code: code, redirect_uri: spRedirect(), client_id: ls("spClient"), code_verifier: ls("spVerifier")}).toString()})
@@ -5046,14 +5159,13 @@ index 0000000..6abebf7
 +  function kindOf(n){ n = (n || "").toLowerCase(); return n.indexOf("nyt-frontpage-") === 0 ? "nyt" : n.indexOf("spotify-") === 0 ? "spotify" : n.indexOf("art-") === 0 ? "art" : "photos"; }
 +  function renderSources(){
 +    Array.prototype.forEach.call(document.querySelectorAll("[data-src]"), function(el){ el.checked = !!sources[el.dataset.src]; });
-+    $("artOn").checked = !!sources.art;
 +    $("artOftenRow").hidden = !sources.art;
 +    Array.prototype.forEach.call(document.querySelectorAll("#artOften .chip"), function(b){ b.classList.toggle("sel", +b.dataset.c === sources.artCount); });
 +    var c = {photos: 0, nyt: 0, spotify: 0, art: 0}; files.forEach(function(f){ c[kindOf(f.name)]++; });
 +    $("srcCountPhotos").textContent = c.photos + (c.photos === 1 ? " photo" : " photos") + (sources.photos ? "" : " · paused");
-+    $("srcCountArt").textContent = "Live, different every time" + (c.art ? " · " + c.art + " kept" : "");
-+    $("srcCountNyt").textContent = c.nyt ? (sources.nyt ? "On the frame" : "Paused") : "Add it from Extras";
-+    $("srcCountSpotify").textContent = c.spotify ? c.spotify + (c.spotify === 1 ? " image" : " images") + (sources.spotify ? "" : " · paused") : "Add it from Extras";
++    $("srcCountArt").textContent = (sources.art ? "On · " : "") + "Live, different every time" + (c.art ? " · " + c.art + " kept" : "");
++    $("srcCountNyt").textContent = c.nyt ? (sources.nyt ? "Today’s front page · in the rotation" : "Paused") : "Today’s front page · not added yet";
++    $("srcCountSpotify").textContent = c.spotify ? (sources.spotify ? "in the rotation" : "paused") : "";
 +    Array.prototype.forEach.call(document.querySelectorAll(".tile[data-name]"), function(t){
 +      var k = kindOf(t.dataset.name), off = !sources[k];
 +      t.classList.toggle("off", off);
@@ -5074,12 +5186,16 @@ index 0000000..6abebf7
 +  }
 +  Array.prototype.forEach.call(document.querySelectorAll("[data-src]"), function(el){
 +    el.onchange = function(){
++      if (el.dataset.src === "music" && el.checked && !music.connected) {
++        el.checked = false; openExtra("spCard", true); toast("Connect Spotify first"); return;
++      }
++      var card = {art: "artCard", music: "spCard", nyt: "nytCard"}[el.dataset.src];
++      if (card && el.checked) openExtra(card, true);
 +      var p = {}; p[el.dataset.src] = el.checked;
 +      var label = {photos: "Photos", art: "Generative art", nyt: "Front page", spotify: "Spotify stills", music: "Live music"}[el.dataset.src];
 +      saveSources(p, label + (el.checked ? " on" : " off"));
 +    };
 +  });
-+  $("artOn").onchange = function(){ saveSources({art: this.checked}, "Generative art " + (this.checked ? "on" : "off")); };
 +  Array.prototype.forEach.call(document.querySelectorAll("#artOften .chip"), function(b){
 +    b.onclick = function(){ saveSources({artCount: +b.dataset.c}, b.textContent); };
 +  });
@@ -5167,6 +5283,29 @@ index 0000000..6abebf7
 +      });
 +    };
 +    x.send(fd);
++  };
++
++  // ---------- maintenance ----------
++  function waitForFrame(msg){
++    var t0 = Date.now(); toast(msg, 6000);
++    setTimeout(function poll(){
++      api("/health").then(function(){ toast("The frame is back"); refreshFiles(); refreshState(); refreshQueue(); })
++        .catch(function(){ if (Date.now() - t0 < 240000) setTimeout(poll, 4000); else toast("The frame hasn’t come back yet. Check its power.", 6000); });
++    }, 8000);
++  }
++  $("mRestart").onclick = function(){
++    askConfirm("Restart the frame’s app?", "Restart", "The picture disappears for a few seconds. Photos and settings stay.").then(function(y){
++      if (!y) return;
++      api("/control?action=restart-app", {method: "POST"}).then(function(j){ if (j && j.fired) waitForFrame("Restarting the app…"); else toast("The frame didn’t accept that"); })
++        .catch(function(){ waitForFrame("Restarting the app…"); });
++    });
++  };
++  $("mReboot").onclick = function(){
++    askConfirm("Reboot the frame?", "Reboot", "It will be off for about a minute. Photos and settings stay.").then(function(y){
++      if (!y) return;
++      api("/control?action=reboot", {method: "POST"}).then(function(j){ if (j && j.fired) waitForFrame("Rebooting. Back in about a minute…"); else toast("The frame didn’t accept that"); })
++        .catch(function(){ waitForFrame("Rebooting. Back in about a minute…"); });
++    });
 +  };
 +
 +  // ---------- go ----------

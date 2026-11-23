@@ -56,6 +56,11 @@
   the installed app's certificate with a higher versionCode; the page then asks the frame to install
   it (`install-staged`, which on an EO2 goes through the frame's own adbd). Build with increasing
   `-PVERSION_CODE` (e.g. 2.0.7 → 20007).
+- **Layout**: four tabs (Now, Library, Extras, Frame) with a flat, typographic style (system
+  serif headings, monospace labels, hairlines, one accent). Each extra is one row with its own
+  switch and expands for options. Frame → Maintenance has Update, Restart the app
+  (`POST /control?action=restart-app`) and Reboot (`POST /control?action=reboot`, via the frame's
+  adbd), both using the watchdog's existing routines.
 - The original page moves to `/advanced`.
 - `POST /settings` changes only interval, quiet hours and time zone (no token, same-origin
   checked, like uploads). Clears the legacy quiet-hour mirror so "off" sticks.

@@ -16,7 +16,7 @@ albums you've been playing. There are no accounts, no subscription and no cloud 
 
 ## What you can do from your phone
 
-![Photo preview, settings and extras on the phone page](docs/images/phone-features.jpg)
+![The Library, Extras and Frame tabs](docs/images/phone-features.jpg)
 
 - **Add photos and GIFs.** Photos are resized and converted on your phone before they're sent,
   so iPhone HEIC photos work and the frame gets small, ready-to-show files. Choose **Fill** (crop
@@ -32,7 +32,10 @@ albums you've been playing. There are no accounts, no subscription and no cloud 
   cleaned up automatically, and the frame refuses uploads that would nearly fill it.
 - **Simple settings:** how often the picture changes (1 minute to 1 day), night-time sleep hours,
   time zone, and the frame's name.
-- **Add it to your home screen** and it opens like an app.
+- **Look after the frame:** update it, restart the app or reboot the frame from the Frame tab,
+  no computer needed.
+- **Four simple tabs:** Now, Library, Extras and Frame. Add it to your home screen and it opens
+  like an app.
 
 ### Extras
 
@@ -43,7 +46,7 @@ albums you've been playing. There are no accounts, no subscription and no cloud 
   piece comes up it picks a new style and seed, so it's never the same twice. Pick which styles
   you like, preview them on your phone, and keep any frame you love as a still.
 
-![A Spotify album grid and a now-playing poster on the frame](docs/images/spotify.jpg)
+![The three live music styles: Kinetic Type, Liquid Light and Album Wall](docs/images/spotify.jpg)
 
 - **The New York Times front page.** Today's print front page, clean, glitched, or as an
   animated glitch GIF. Your phone fetches and renders it, and it replaces yesterday's.
